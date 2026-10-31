@@ -39,6 +39,7 @@ export interface ChannelRouteDeps {
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
     | "createGroupTask" | "appendMessage">;
+  line?: (threadId: string, key: "server.rooms.turnLimitInvalid") => string;
   cfg: Pick<AppConfig, "budgets">;
   /** What people's lines are called in this conversation (replies.ts PersonName). */
   userName(threadId: string): PersonName;
@@ -215,7 +216,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!pinning && !renaming && !limiting) return json(res, 400, { error: "unsupported channel thread setting" });
       if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
       if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
-      const parsedLimit = limiting ? parseConversationTurnTimeout(body.turnTimeoutMinutes) : null;
+      const parsedLimit = limiting ? parseConversationTurnTimeout(body.turnTimeoutMinutes, () => deps.line?.(existing.threadId, "server.rooms.turnLimitInvalid")
+        ?? "Turn limit must be a whole number from 1 to 1,440, or null to use the group default.") : null;
       if (parsedLimit && !parsedLimit.ok) return json(res, 400, { error: parsedLimit.error });
       // Echoing the current title is not a rename: newer clients send it so an older server keeps the title.
       const titleChange = renaming && body.title !== existing.title;

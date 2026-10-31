@@ -7,6 +7,7 @@ import { supportsApprovalMode, type ApprovalMode } from "../shared/approval-mode
 import { failedTurnTool, type FailedTurnTool } from "../shared/failed-turn.ts";
 import { isOutboundTool } from "../shared/outbound.ts";
 import type { ProviderAdapter, RequestOutcome } from "./contracts.ts";
+import { serverLine } from "./server-lines.ts";
 
 /** An expired ask must never become a fresh Allow/Deny card. */
 export async function deliverFullAccessApproval(
@@ -125,11 +126,12 @@ export function autoVerdict(
 export function undeliveredApprovalTool(
   outcome: Exclude<RequestOutcome, "allowed-once" | "unavailable"> | "failed",
   source: AutoVerdictSource,
+  language?: string,
 ): FailedTurnTool | { name: string; ok: false } {
   if (outcome !== "rejected") return failedTurnTool("could not deliver approval to the provider; retry the task after reconnecting.");
-  const grant = source === "command-allowlist" ? "the saved command permission"
-    : source === "tool-allowlist" ? "the saved tool permission" : "Full access";
-  return { name: `The provider rejected this action despite ${grant}.`, ok: false };
+  const grant = source === "command-allowlist" ? "server.routines.approval.savedCommand"
+    : source === "tool-allowlist" ? "server.routines.approval.savedTool" : "server.routines.approval.fullAccess";
+  return { name: serverLine(language, "server.routines.approval.rejected", { grant: serverLine(language, grant) }), ok: false };
 }
 
 /** The client translates by key and falls back to this text, which the server keeps sending for older cards. */

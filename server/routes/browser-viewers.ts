@@ -35,6 +35,7 @@ export interface BrowserViewerRouteDeps {
   viewers: Pick<LiveRouter, "open" | "action" | "stream" | "fileChooserOffered" | "answerFileChooser" | "download">;
   /** Who is watching, as a hold of the browser knows them: every view and device of one person shares their hold. */
   person(auth: RequestAuth): string;
+  lineLanguage?: (person: string) => string | undefined;
   /** Whose browser of the bot this person's view shows (`threadId` names the conversation they look at); null when
    * they may not see that conversation. */
   audience(auth: RequestAuth, threadId: string | null): Audience | null;
@@ -151,6 +152,7 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       pending.release();
       const opened = deps.viewers.stream({
         session: browser.session, spec: browser.spec, botId: browser.botId, owner, person,
+        lineLanguage: deps.lineLanguage?.(person),
         canOperate: url.searchParams.get("interactive") !== "false",
         params: url.searchParams, req, socket: pending.socket, head: pending.head,
         isCurrent, restartRefusal: () => deps.restartRefusal(browser.session),

@@ -36,8 +36,9 @@ export function roomTurnNarrationIds(messages: readonly Message[]): Set<string> 
 export const ROOM_SUMMARY_REASK =
   "Your last turn in this room ended without a final message to the room. Reply now with one short message (1–3 lines): your result, or that you could not finish and why. Do not start new work.";
 
-export function finishedWithoutSummaryLine(name: string, reasking: boolean): string {
-  return reasking
-    ? `${name} finished without a summary — asking for a short result`
-    : `${name} finished without a summary`;
+export type RoomReplyLine = (key: "server.rooms.finishedWithoutSummary" | "server.rooms.finishedWithoutSummaryReasking", params: { bot: string }) => string;
+
+export function finishedWithoutSummaryLine(name: string, reasking: boolean, line: RoomReplyLine = (key, params) =>
+  key.endsWith("Reasking") ? `${params.bot} finished without a summary — asking for a short result` : `${params.bot} finished without a summary`): string {
+  return line(reasking ? "server.rooms.finishedWithoutSummaryReasking" : "server.rooms.finishedWithoutSummary", { bot: name });
 }

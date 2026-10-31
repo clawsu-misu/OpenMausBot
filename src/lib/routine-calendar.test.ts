@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLocale } from "@/lib/i18n";
 
 import type { Routine, RoutineRun } from "./routines";
 import {
   atLocalTime,
+  calendarRangeLabel,
   formatGmtOffset,
   intervalAnchorForSave,
   nextIntervalForSave,
@@ -51,6 +53,13 @@ describe("routine editor timestamp precision", () => {
 });
 
 describe("routine calendar geometry", () => {
+  afterEach(() => setLocale("en"));
+  it("formats the calendar range in the selected app language", () => {
+    setLocale("zh");
+    const start = new Date(2026, 8, 14).getTime();
+    expect(calendarRangeLabel(start, 1)).toBe(new Date(start).toLocaleDateString("zh", { month: "long", day: "numeric", year: "numeric" }));
+  });
+
   it("anchors a new interval one cadence after save on a clean minute", () => {
     const saveClick = new Date(2026, 7, 31, 9, 12, 34, 567).getTime();
     const anchor = nextIntervalAnchor(saveClick, 5);

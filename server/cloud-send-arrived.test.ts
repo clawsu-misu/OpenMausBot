@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { arrivedRoute, automationsOffRoute, homeRoute, movedFrom, webhookHomeLine, webhookMovedLine } from "./cloud-send-arrived.ts";
 import type { MoveAutomations } from "./move-freeze.ts";
 
@@ -28,6 +29,11 @@ function cloud(owner = true) {
 }
 
 describe("POST /api/cloud-send/arrived", () => {
+  it("writes webhook address instructions in the person's language, with English as the default", () => {
+    expect(webhookMovedLine("Orders", "My Cloud", "zh")).toContain("webhook“Orders”有了新地址");
+    expect(webhookMovedLine("Orders")).toContain('my webhook "Orders" has a new address');
+  });
+
   it("keeps the computer the bots came from, and each webhook's bot says its new address is on its card, once", async () => {
     const { dataDir, lines, ask } = cloud();
     expect(await ask({ v: 1, computer: "MacBook Air", webhooks: ["w1", "w2", "w9"] })).toEqual({ status: 200, body: { v: 1, told: 1 } });

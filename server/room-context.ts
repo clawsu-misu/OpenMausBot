@@ -24,10 +24,12 @@ export type RoomContextClock = {
 
 type RoomReset = { reason: "requested" | "threshold"; percent: number };
 
-export function roomResetNote(name: string, reset: RoomReset): string {
-  return reset.reason === "requested"
-    ? `compacted ${name}'s context (${reset.percent}% full): fresh session with the room's recent messages`
-    : `${name}'s context was ${reset.percent}% full: compacted to a fresh session with the room's recent messages`;
+export type RoomContextLine = (key: "server.rooms.compactedNow" | "server.rooms.compactedAtThreshold", params: { name: string; percent: number }) => string;
+
+export function roomResetNote(name: string, reset: RoomReset, line: RoomContextLine = (key, params) => key === "server.rooms.compactedNow"
+  ? `compacted ${params.name}'s context (${params.percent}% full): fresh session with the room's recent messages`
+  : `${params.name}'s context was ${params.percent}% full: compacted to a fresh session with the room's recent messages`): string {
+  return line(reset.reason === "requested" ? "server.rooms.compactedNow" : "server.rooms.compactedAtThreshold", { name, percent: reset.percent });
 }
 
 export class RoomContextTracker {

@@ -5,6 +5,7 @@ import { ModelRequestService, type ModelRequestStore, type OptionCardLike } from
 import type { ModelSelection } from "../shared/wire.ts";
 import type { BotRecord } from "./store.ts";
 import { appliesNow, type DirectApplyCheck } from "./direct-apply.ts";
+import "./server-line-packs.ts";
 
 interface StoredMessage {
   id: string;
@@ -69,6 +70,16 @@ const CAPS: Record<string, { driverKind: string; agentsMcp: boolean }> = {
 const caps = (instanceId: string) => CAPS[instanceId];
 
 describe("ModelRequestService", () => {
+  it("localizes the model card for its person's language", () => {
+    const store = new MemoryStore();
+    const bot = addBot(store, "Scout");
+    const service = new ModelRequestService({ store });
+    const proposal = service.propose({ botId: bot.id, threadId: bot.threadId,
+      selection: { instanceId: "claude", model: "opus" }, reason: "asked", language: "zh-CN" });
+    expect(proposal.title).toBe("更改 Scout 的默认 AI 和模型？");
+    expect(proposal.detail).toContain("不会运行任何操作。");
+  });
+
   it("renders engine-switch capability warnings and applies the reviewed change", () => {
     const store = new MemoryStore();
     const bot = addBot(store, "Scout");

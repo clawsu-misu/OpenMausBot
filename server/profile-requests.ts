@@ -10,6 +10,7 @@ import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { recordProfileChange } from "./profile-versions.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { BotRecord } from "./store.ts";
+import { serverLine } from "./server-lines.ts";
 
 const MAX_REASON = 500;
 const STALE = "This bot's profile changed after this card was prepared. Ask the bot to review it and propose again.";
@@ -167,15 +168,14 @@ export function profileCardCopy(
   before: ProfileRequestChanges,
   changes: ProfileRequestChanges,
   reason: string,
+  language?: string,
 ): ProfileCardCopy {
   const isSetup = !fullProfile.title && !fullProfile.description && !fullProfile.soul;
-  const title = target.crossBot
-    ? `Update @${target.name}'s profile?`
-    : isSetup
-      ? `Set up ${target.name}?`
-      : `Update ${target.name}'s profile?`;
+  const title = target.crossBot || !isSetup
+    ? serverLine(language, "server.routines.profile.update", { at: target.crossBot ? "@" : "", name: target.name })
+    : serverLine(language, "server.routines.profile.setup", { name: target.name });
 
-  const lines: string[] = target.crossBot ? [`Whose profile: @${target.name}`, `Why: ${reason}`] : [`Why: ${reason}`];
+  const lines: string[] = target.crossBot ? [serverLine(language, "server.routines.profile.whose", { name: target.name }), serverLine(language, "server.routines.model.why", { reason })] : [serverLine(language, "server.routines.model.why", { reason })];
   for (const field of PROFILE_REQUEST_FIELDS) {
     if (field === "soul" || field === "cwd") continue;
     if (changes[field] === undefined) continue;
@@ -223,6 +223,7 @@ export class ProfileRequestService {
     changes: unknown;
     reason: unknown;
     from?: { botId: string; name: string; color: string };
+    language?: string;
   }): { requestId: string; messageId: string; title: string; summary: string; detail: string } {
     return this.prepare(args);
   }
@@ -287,7 +288,7 @@ export class ProfileRequestService {
       expectedRevision: profileRevision(target),
     };
 
-    const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason);
+    const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason, args.language);
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
     const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);

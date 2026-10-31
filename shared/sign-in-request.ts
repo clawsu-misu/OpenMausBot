@@ -76,6 +76,10 @@ export function signInResumePrompt(site: string, outcome: "done" | "cancelled"):
 
 /** The transcript line under the card, and all a client that does not know
  * the card draws. */
-export function signInFallbackText(botName: string, site: string): string {
-  return `${botName} needs you to sign in to ${site}. Open this conversation in OpenMausBot to sign in, then press Done.`;
+export function signInFallbackText(
+  botName: string,
+  site: string,
+  format: (bot: string, site: string) => string = (bot, target) => `${bot} needs you to sign in to ${target}. Open this conversation in OpenMausBot to continue.`,
+): string {
+  return format(botName, site);
 }

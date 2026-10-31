@@ -3,6 +3,7 @@
 // MCP tool's function_call without the `namespace` codex sent it under (seen with non-OpenAI models behind an
 // OpenAI-compatible gateway). The only trace is the thread's rollout file, so the turn reads what it appended there.
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { serverLine } from "../server-lines.ts";
 
 /** Where the thread's rollout file ended when the turn started. */
 export interface RolloutMark {
@@ -78,16 +79,15 @@ export function unsupportedCallsSince(mark: RolloutMark | null, maxBytes = ROLLO
   }
 }
 
-export function unsupportedCallsNotice(tools: readonly string[]): string {
+export function unsupportedCallsNotice(tools: readonly string[], language?: string): string {
   const named = tools.slice(0, 6).join(", ") + (tools.length > 6 ? ` and ${tools.length - 6} more` : "");
-  return `Codex could not run ${tools.length === 1 ? "the tool" : "the tools"} ${named} ("unsupported call"): the AI provider sent ` +
-    "the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.";
+  return serverLine(language, tools.length === 1 ? "server.codex.unsupportedOne" : "server.codex.unsupportedMany", { named });
 }
 
 /** Logs and tells the thread about every call codex refused since `mark`, so a dropped namespace is never silent. */
-export function reportUnsupportedCalls(mark: RolloutMark | null, notice: (message: string) => void): void {
+export function reportUnsupportedCalls(mark: RolloutMark | null, notice: (message: string) => void, language?: string): void {
   const tools = unsupportedCallsSince(mark);
   if (!tools.length) return;
   console.warn(`[codex] unsupported tool call (provider dropped the MCP namespace): ${tools.join(", ")}`);
-  notice(unsupportedCallsNotice(tools));
+  notice(unsupportedCallsNotice(tools, language));
 }

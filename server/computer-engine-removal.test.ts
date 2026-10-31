@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
+import "./server-line-packs.ts";
 import { DATA_DIR, instanceConfigs, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import { SECTION_CONTEXTS_FILE } from "./section-context.ts";
 import { Store, type BotRecord } from "./store.ts";
@@ -263,6 +264,12 @@ describe("moving saved bots off the engine", () => {
 });
 
 describe("the line a moved conversation shows", () => {
+  it("uses the conversation owner's language and keeps English as the default", () => {
+    expect(computerEngineMoveText({ scope: "conversation", cloud: true, askNow: false }, "Scout", "Claude", "zh-CN"))
+      .toBe("此会话现在使用 Claude。模型列表中的“Computer”选项已移除。它仍可在 Scout 的云端桌面上运行。");
+    expect(computerEngineMoveText({ scope: "conversation", cloud: true, askNow: false }, "Scout", "Claude"))
+      .toContain("This conversation now uses Claude.");
+  });
   it("names the bot, the new engine, the removed choice as people saw it, and only what is true", () => {
     expect(computerEngineMoveText({ scope: "bot", cloud: true, askNow: false }, "Scout", "Claude")).toBe(
       "Scout now uses Claude. The Computer choice in the model list was removed. Scout still works on its cloud desktop.");

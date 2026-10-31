@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { initialGreeting, setupRequestLine } from "./initial-greeting.ts";
+import "./server-line-packs.ts";
 
 describe("the line after Set me up", () => {
   it("is written in the app's language, by region, with English for any other", () => {
@@ -19,6 +20,13 @@ describe("the line after Set me up", () => {
 });
 
 describe("a new bot's greeting", () => {
+  it("uses the configured language for a server-created new-bot greeting", () => {
+    expect(initialGreeting("LocaleSmoke", "zh-CN")).toBe("你好，我是LocaleSmoke。你希望我做什么？");
+    expect(initialGreeting("LocaleSmoke", "zh-CN", "小明")).toBe("你好小明，我是LocaleSmoke。你希望我做什么？");
+    expect(initialGreeting("LocaleSmoke", "zh-TW", "Milind Soni")).toBe("Hi Milind, I'm LocaleSmoke. What would you like me to do?");
+    expect(initialGreeting("LocaleSmoke")).toBe("Hi, I'm LocaleSmoke. What would you like me to do?");
+  });
+
   it("names the person by their first name, in the app's language", () => {
     expect(initialGreeting("Scout", "en", "Milind Soni")).toBe("Hi Milind, I'm Scout. What would you like me to do?");
     expect(initialGreeting("Scout", "es-MX", "  Ana  María ")).toBe("Hola Ana, soy Scout. ¿Qué te gustaría que hiciera?");

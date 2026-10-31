@@ -10,6 +10,7 @@ import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from ".
 import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
+import { serverLine, type LineLanguage } from "./server-lines.ts";
 
 export const DELEGATION_SETTLE_MS = 700;
 export const CONSENT_SETTLE_MS = 1_200;
@@ -45,6 +46,7 @@ export interface LiveCallDeps {
   queued(botId: string, threadId: string, queueId: string): boolean;
   signedIn?(auth: RequestAuth): boolean;
   personKey?(auth: RequestAuth): string | undefined;
+  lineLanguage?: LineLanguage;
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
   settings(): { key: string; voice: string; readTypedReplies: boolean; idleMinutes: number };
@@ -665,7 +667,7 @@ export class LiveCallController {
     const lead = !forCall && typed !== undefined ? [LIVE_COPY.typedAnswerLead(typed)] : [];
     const utterances = this.deps.speakable(message.text ?? "");
     if (!utterances.length) return;
-    const chunks = commentaryChunks([...lead, ...utterances]);
+    const chunks = commentaryChunks([...lead, ...utterances], (key, params) => serverLine(this.deps.lineLanguage?.(call.state.threadId), key, params));
     if (!chunks.length) return;
     call.spokenAnswers.add(message.id);
     settle();

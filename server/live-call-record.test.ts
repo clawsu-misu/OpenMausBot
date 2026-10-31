@@ -6,6 +6,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall, type LiveCallRecordDep
 import { redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
+import { addServerLinePacks } from "./server-lines.ts";
 
 const record = (extra: Partial<LiveCallRecord> = {}): LiveCallRecord => ({
   callId: "call-1", botId: "bot1", client: "ios", startedAt: 1_000, endedAt: 103_000, seconds: 102, endReason: "hung-up", ...extra,
@@ -25,6 +26,7 @@ describe("recordLiveCall", () => {
   function chat(exists = true) {
     const appended: Message[] = [];
     const deps = {
+      line: undefined as LiveCallRecordDeps["line"],
       chatExists: vi.fn((_botId: string, _threadId: string) => exists),
       appendMessage: vi.fn((_threadId: string, message: Omit<Message, "id" | "at">) => {
         const full: Message = { id: `row${appended.length + 1}`, at: 1, ...message };
@@ -40,6 +42,14 @@ describe("recordLiveCall", () => {
     const row = recordLiveCall(deps, { threadId: "t1", botName: "Ada", record: record() });
     expect(deps.appendMessage).toHaveBeenCalledWith("t1", { role: "bot", kind: "call", text: "Call with Ada · 1:42", call: record() });
     expect(appended).toEqual([row]);
+  });
+
+  it("writes the call row in the person's application language", () => {
+    addServerLinePacks({ zh: { "server.rooms.callWithBot": "与{bot}通话" } });
+    const { deps, appended } = chat();
+    deps.line = (key, params) => key === "server.rooms.callWithBot" ? `与${params.bot}通话` : "";
+    recordLiveCall(deps, { threadId: "t1", botName: "Ada", record: record() });
+    expect(appended[0]?.text).toBe("与Ada通话 · 1:42");
   });
 
   it("writes nothing when the call's chat or bot was deleted during the call", () => {

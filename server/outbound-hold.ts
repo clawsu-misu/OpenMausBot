@@ -8,6 +8,7 @@ import type { OutboundCounts } from "./outbound-counts.ts";
 import type { OutboundRequestService } from "./outbound-requests.ts";
 import { outboundCard } from "./outbound-requests.ts";
 import type { BotRecord, GroupRecord, Store } from "./store.ts";
+import { serverLine } from "./server-lines.ts";
 
 /** How long a "Send on your behalf?" card waits on the person before it times out. */
 export const OUTBOUND_HOLD_MS = 9 * 60_000;
@@ -25,6 +26,7 @@ export interface OutboundHoldDeps {
   connectorThread: (botId: string, threadId: string) => { group?: GroupRecord } | null;
   activeGroupTurnForBot: (botId: string) => { threadId: string } | null;
   notify: (notification: Notification | null) => void;
+  language?(threadId: string): string | undefined;
 }
 
 export type OutboundHoldAnswer = { ok: true; approved: boolean } | { ok: false; text: string };
@@ -66,7 +68,7 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
           kind: "options",
           ...(owner?.group ? { from: { botId: currentSender.id, name: currentSender.name, color: currentSender.color } } : {}),
           card: {
-            title: "Send on your behalf?",
+            title: serverLine(deps.language?.(threadId), "server.routines.outbound.title"),
             subtitle: summary,
             options: ["Allow", "Deny"],
             requestId: held.requestId,

@@ -9,7 +9,10 @@ export interface RoomHoldRouteDeps {
   setHold(groupId: string, botId: string, held: boolean): WireGroup | null;
   /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
+  line?(auth: RequestAuth, key: RoomHoldErrorKey): string;
 }
+
+type RoomHoldErrorKey = "server.rooms.holds.invalidBody" | "server.rooms.holds.notFound" | "server.rooms.holds.botToBot" | "server.rooms.holds.notMember";
 
 const HOLDS = /^\/api\/groups\/([\w-]+)\/holds$/u;
 const BODY = z.object({ botId: z.string().regex(/^[\w-]+$/), held: z.boolean() }).strict();
@@ -18,14 +21,15 @@ export function createRoomHoldRoutes(deps: RoomHoldRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     const m = HOLDS.exec(path);
     if (!m || method !== "POST") return PASS;
+    const line = (key: RoomHoldErrorKey, fallback: string) => deps.line?.(auth, key) ?? fallback;
     const parsed = BODY.safeParse(await readBody(req));
-    if (!parsed.success) return json(res, 400, { error: 'body must be {"botId": "<room member id>", "held": true}' });
+    if (!parsed.success) return json(res, 400, { error: line("server.rooms.holds.invalidBody", 'body must be {"botId": "<room member id>", "held": true}') });
     const group = deps.group(m[1]!);
-    if (!group) return json(res, 404, { error: "no such room" });
-    if (group.dm) return json(res, 400, { error: "members of a bot-to-bot channel cannot be held" });
-    if (!group.memberIds.includes(parsed.data.botId)) return json(res, 404, { error: "that bot is not a member of this room" });
+    if (!group) return json(res, 404, { error: line("server.rooms.holds.notFound", "no such room") });
+    if (group.dm) return json(res, 400, { error: line("server.rooms.holds.botToBot", "members of a bot-to-bot channel cannot be held") });
+    if (!group.memberIds.includes(parsed.data.botId)) return json(res, 404, { error: line("server.rooms.holds.notMember", "that bot is not a member of this room") });
     const updated = deps.setHold(m[1]!, parsed.data.botId, parsed.data.held);
-    if (!updated) return json(res, 404, { error: "no such room" });
+    if (!updated) return json(res, 404, { error: line("server.rooms.holds.notFound", "no such room") });
     return json(res, 200, { ok: true, group: deps.groupFor?.(auth, updated) ?? updated });
   };
 }

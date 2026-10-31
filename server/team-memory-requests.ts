@@ -4,6 +4,7 @@ import type { DecisionRow } from "./decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { TeamMemoryConflict, type TeamMemory, type TeamMemoryInput } from "./team-memory.ts";
 import type { OptionCardData } from "../shared/wire.ts";
+import { serverLine } from "./server-lines.ts";
 
 type Speaker = { id: string; name: string; color: string; section?: string };
 type Card = OptionCardData;
@@ -19,6 +20,7 @@ export interface TeamMemoryRequestDeps {
   };
   sectionKey(section: string | undefined): string;
   decide(row: Omit<DecisionRow, "at">): void;
+  language?(threadId: string): string | undefined;
 }
 
 export type TeamMemoryUndo = { claimed: false } | { claimed: true; state: "already_undone" | "undone" }
@@ -47,12 +49,13 @@ export function createTeamMemoryRequests(deps: TeamMemoryRequestDeps) {
         revision = teamMemory.list(from.section).find((candidate) => candidate.id === entry.id)?.revision;
       }
       const summary = `${entry.kind[0].toUpperCase()}${entry.kind.slice(1)}: ${entry.name}${entry.aliases.length ? ` (also ${entry.aliases.join(", ")})` : ""} — ${entry.detail}`;
+      const language = deps.language?.(threadId);
       const message = store.appendMessage(threadId, {
         role: "bot",
         kind: "options",
         ...(inRoom ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
         card: {
-          title: direct ? "Remembered for the team" : "Remember this for the team?",
+          title: serverLine(language, direct ? "server.routines.teamMemory.remembered" : "server.routines.teamMemory.ask"),
           subtitle: summary,
           options: direct ? [] : ["Remember", "Skip"],
           ...(direct ? { answered: "allow", autoApplied: true } : {}),

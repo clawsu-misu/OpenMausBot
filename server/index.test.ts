@@ -249,6 +249,12 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 };
 
+const useEnglish = async (): Promise<() => Promise<void>> => {
+  const language = (await api("GET", "/api/config")).body.language ?? "";
+  expect((await api("PUT", "/api/config", { language: "en" })).status).toBe(200);
+  return async () => { expect((await api("PUT", "/api/config", { language })).status).toBe(200); };
+};
+
 const releaseTurn = async (botId: string) => {
   writeFileSync(fakeClaudeRelease, "release");
   try {
@@ -2961,6 +2967,8 @@ describe("harness HTTP API", () => {
   });
 
   it("searches transcripts and exports a conversation", async () => {
+    const restoreLanguage = await useEnglish();
+    try {
     const bot = (await api("POST", "/api/bots")).body.bot;
     // every new bot opens with a seeded greeting — a known searchable string
     const hits = await api("GET", "/api/search?q=what%20would%20you%20like");
@@ -3021,6 +3029,9 @@ describe("harness HTTP API", () => {
     await api("DELETE", `/api/bots/${bot.id}`);
     const after = await api("GET", "/api/search?q=nice%20to%20meet");
     expect(after.body.hits.find((h: { botId?: string }) => h.botId === bot.id)).toBeUndefined();
+    } finally {
+      await restoreLanguage();
+    }
   });
 
   it("stores a room reply as a flat reference and rejects foreign targets", async () => {
@@ -7063,6 +7074,7 @@ describe("harness HTTP API", () => {
   });
 
   it("creates a fully configured bot in one request and greets with its final name", async () => {
+    const restoreLanguage = await useEnglish();
     const created = await api("POST", "/api/bots", {
       name: "  Pathfinder  ",
       title: "Researcher",
@@ -7084,6 +7096,7 @@ describe("harness HTTP API", () => {
       expect(bot.messages[0].text).not.toContain("Maus");
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
+      await restoreLanguage();
     }
   });
 
@@ -7739,6 +7752,7 @@ describe("harness HTTP API", () => {
   });
 
   it("a new bot opens with one greeting and no quiz card", async () => {
+    const restoreLanguage = await useEnglish();
     const bot = (await api("POST", "/api/bots", { name: "Fresh" })).body.bot;
     try {
       expect(bot.messages).toHaveLength(1);
@@ -7747,10 +7761,12 @@ describe("harness HTTP API", () => {
       expect(bot.messages.some((m: { kind: string }) => m.kind === "options")).toBe(false);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
+      await restoreLanguage();
     }
   });
 
   it("a new bot greets its person by first name and is announced in its chosen look, or a fresh one, from the first frame", async () => {
+    const restoreLanguage = await useEnglish();
     const before = (await api("GET", "/api/config")).body.profile?.name ?? "";
     expect((await api("PUT", "/api/config", { profile: { name: "Milind Soni" } })).status).toBe(200);
     const stream = await openSse(`${BASE}/api/events`);
@@ -7771,10 +7787,12 @@ describe("harness HTTP API", () => {
       stream.close();
       if (id) await api("DELETE", `/api/bots/${id}`);
       await api("PUT", "/api/config", { profile: { name: before } });
+      await restoreLanguage();
     }
   });
 
   it("writes a new bot's setup answers with its own engine on Haiku 5.5 without thinking, and keeps the fixed ones when that fails", async () => {
+    const restoreLanguage = await useEnglish();
     const before = (await api("GET", "/api/config")).body.profile?.name ?? "";
     const answers = ["Sort my receipts", "Check my unpaid invoices", "Draft a payment reminder", "Find a missing expense", "Remind me of tax deadlines"];
     const ids: string[] = [];
@@ -7813,10 +7831,12 @@ describe("harness HTTP API", () => {
       rmSync(setupAnswersFile, { force: true });
       for (const id of ids) await api("DELETE", `/api/bots/${id}`);
       await api("PUT", "/api/config", { profile: { name: before }, features: { smartSetupChoices: false } });
+      await restoreLanguage();
     }
   });
 
   it("writes a new bot's setup answers again when it is renamed before anyone answers, and without the name for a picked one", async () => {
+    const restoreLanguage = await useEnglish();
     const hiring = ["Screen my new candidates", "Draft a job post", "Schedule my interviews", "Find candidates on job sites", "Remind me to follow up"];
     const everyday = ["Find cheap flights", "Sort my inbox", "Check my calendar", "Draft a cover letter", "Remind me to pay bills"];
     const greeting = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages[0];
@@ -7852,6 +7872,7 @@ describe("harness HTTP API", () => {
       rmSync(setupAnswersFile, { force: true });
       if (id) await api("DELETE", `/api/bots/${id}`);
       await api("PUT", "/api/config", { features: { smartSetupChoices: false } });
+      await restoreLanguage();
     }
   });
 
@@ -9259,6 +9280,7 @@ describe("harness HTTP API", () => {
     };
 
     it("answers the press at once with the bot's own line and no model, and keeps the waiting mark on the server", async () => {
+      const restoreLanguage = await useEnglish();
       const bot = await blankBot("Press");
       try {
         expect(bot.messages[0]).toMatchObject({ role: "bot", kind: "text", text: "Hi, I'm Press. What would you like me to do?", setupOffer: true });
@@ -9274,6 +9296,7 @@ describe("harness HTTP API", () => {
         expect(existsSync(fakeClaudeDump)).toBe(false);
       } finally {
         await api("DELETE", `/api/bots/${bot.id}`);
+        await restoreLanguage();
       }
     });
 
@@ -11041,7 +11064,8 @@ describe("harness HTTP API", () => {
           },
         }),
       });
-      expect(crossProposed.status).toBe(201);
+      const crossProposedError = crossProposed.status === 201 ? "" : z.object({ error: z.string() }).parse(await crossProposed.clone().json()).error.replace(/\b[A-Za-z0-9_-]{24,}\b/g, "[redacted]");
+      expect(crossProposed.status, crossProposedError).toBe(201);
       // Applied at once for a teammate too (Triggers v2): no card waits on the person.
       const crossProposal = z.object({ requestId: z.string(), state: z.literal("applied"), result: z.object({ resultId: z.string() }).passthrough() }).passthrough().parse(await crossProposed.json());
       const crossState = (await api("GET", "/api/bots")).body;
@@ -11083,8 +11107,8 @@ describe("harness HTTP API", () => {
       const crossStateAfterRun = (await api("GET", "/api/bots?messages=0")).body;
       expect(crossStateAfterRun.bots.find((candidate: { id: string }) => candidate.id === teammate.id)
         ?.tasks.find((task: { threadId: string }) => task.threadId === teammate.threadId)?.unread).toBe(true);
-
-      expect((await api("PATCH", `/api/bots/${teammate.id}`, { section: "Private routine work" })).status).toBe(200);
+      const movedSection = await api("PATCH", `/api/bots/${teammate.id}`, { section: "Private routine work" });
+      expect(movedSection.status, JSON.stringify(movedSection.body)).toBe(200);
       const movedRun = await api("POST", `/api/routines/${crossRoutine.id}/run`);
       expect(movedRun.status).toBe(201);
       await expect.poll(async () => {
@@ -11411,7 +11435,8 @@ describe("harness HTTP API", () => {
       const routine = (name: string) => ({ name, instructions: `Run ${name}.`, schedule: { type: "weekly", time: "09:00", weekdays: ["monday"] }, runOn: "maus" });
       for (let index = 0; index < 9; index += 1) {
         const teammates = await post({ action: "create", kind: "schedule", forBotId: teammate.id, routine: routine(`Teammate ${index}`) });
-        expect(teammates.status).toBe(201);
+        const error = teammates.status === 201 ? "" : z.object({ error: z.string() }).parse(await teammates.clone().json()).error.replace(/\b[A-Za-z0-9_-]{24,}\b/g, "[redacted]");
+        expect(teammates.status, error).toBe(201);
         expect(await teammates.json()).toMatchObject({ state: "applied" });
       }
       expect((await api("GET", "/api/routines")).body.routines.filter((candidate: { botId: string }) => candidate.botId === teammate.id)).toHaveLength(9);

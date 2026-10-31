@@ -40,6 +40,21 @@ describe("time zones in plain words", () => {
     expect(plainWeekdays([1, 3])).toBe("Monday, Wednesday");
   });
 
+  it("uses the requested language for weekdays", () => {
+    expect(plainWeekdays([1, 2, 3, 4, 5], "zh-CN", { everyDay: "每天", weekdays: "工作日" })).toBe("工作日");
+    expect(plainWeekdays([0, 1, 2, 3, 4, 5, 6], "zh-CN", { everyDay: "每天", weekdays: "工作日" })).toBe("每天");
+    expect(plainWeekdays([1, 3], "zh-CN")).toBe("星期一、星期三");
+    expect(plainWeekdays([1, 2, 3, 4, 5], "de-DE", { weekdays: "werktags" })).toBe("werktags");
+    expect(plainWeekdays([1, 3], "de-DE")).toBe("Montag, Mittwoch");
+  });
+
+  it("falls back to English for blank or malformed language tags", () => {
+    expect(plainWeekdays([1, 3], "")).toBe("Monday, Wednesday");
+    expect(plainWeekdays([1, 3], "not_a_locale")).toBe("Monday, Wednesday");
+    expect(plainTimeZone("Asia/Kolkata", "")).toBe(plainTimeZone("Asia/Kolkata", "en"));
+    expect(plainTimeZone("Asia/Kolkata", "not_a_locale")).toBe(plainTimeZone("Asia/Kolkata", "en"));
+  });
+
   it("writes a clock time without a leading zero", () => {
     expect(plainClock("09:00")).toBe("9:00");
     expect(plainClock("17:30")).toBe("17:30");

@@ -19,9 +19,19 @@ export interface DelegatedLevelDeps {
   turnLevel: (bot: BotRecord, peerInitiated: boolean, threadId: string) => ApprovalMode;
   driverKind: (bot: BotRecord) => string | undefined;
   guestDriven: (threadId: string) => boolean;
+  line?: (threadId: string, key: DelegatedLevelLineKey, params: { level?: string; sender?: string; chief?: string }) => string;
 }
 
+type DelegatedLevelLineKey = "server.rooms.delegatedApproval" | "server.rooms.delegatedApprovalViaChief"
+  | "server.rooms.delegatedLevel.ask" | "server.rooms.delegatedLevel.edits" | "server.rooms.delegatedLevel.auto" | "server.rooms.delegatedLevel.full";
+
 const NAMES: Partial<Record<ApprovalMode, string>> = { edits: "Auto-accept edits", auto: "Approve for me", full: "Full access" };
+const LEVEL_KEYS: Partial<Record<ApprovalMode, DelegatedLevelLineKey>> = {
+  ask: "server.rooms.delegatedLevel.ask",
+  edits: "server.rooms.delegatedLevel.edits",
+  auto: "server.rooms.delegatedLevel.auto",
+  full: "server.rooms.delegatedLevel.full",
+};
 const MAX_HOPS = 32;
 
 export function createDelegatedLevel(deps: DelegatedLevelDeps) {
@@ -57,12 +67,14 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
     const passed = handedDown({ botId: from.id, threadId: fromThreadId, ...(parentId ? { parentId } : {}) }, target, own);
     if (!passed || store.taskByThread(target.id, threadId)?.approvalMode === passed.level) return;
     store.patchTask(target.id, threadId, { approvalMode: passed.level, autoApprove: false, alwaysAllow: [] });
-    const name = NAMES[passed.level] ?? passed.level;
+    const name = deps.line?.(threadId, LEVEL_KEYS[passed.level] ?? "server.rooms.delegatedLevel.ask", {}) ?? NAMES[passed.level] ?? passed.level;
     const via = passed.chief.id === from.id ? "" : `from ${passed.chief.name}, `;
+    const activity = deps.line?.(threadId, via ? "server.rooms.delegatedApprovalViaChief" : "server.rooms.delegatedApproval", { level: name, sender: from.name, chief: passed.chief.name })
+      ?? `${name} — delegated by ${from.name}, ${via}a Chief of Staff on ${name}`;
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: `${name} — delegated by ${from.name}, ${via}a Chief of Staff on ${name}`, ok: true },
+      tool: { name: activity, ok: true },
     });
   }
 

@@ -147,8 +147,10 @@ export function rememberHeldMessage(
   return { ...heldMessages, [botId]: [...current, entry].slice(-MAX_HELD_MESSAGES) };
 }
 
-export function heldMemberLine(name: string): string {
-  return `${name} is held (stopped by you) — @mention it or say resume`;
+export type RoomHoldLine = (key: "server.rooms.memberHeld", params: { name: string }) => string;
+
+export function heldMemberLine(name: string, line: RoomHoldLine = (_key, params) => `${params.name} is held (stopped by you) — @mention it or say resume`): string {
+  return line("server.rooms.memberHeld", { name });
 }
 
 export function isHeldMemberLine(text: string): boolean {

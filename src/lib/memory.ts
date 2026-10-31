@@ -1,4 +1,5 @@
 import { ApiError, api } from "@/state/store";
+import { activeLocale, documentLanguage, t } from "@/lib/i18n";
 
 export const MEMORY_INDEX = "MEMORY.md";
 
@@ -149,11 +150,14 @@ export function tidyMemoryNow(botId: string): Promise<{ report: TidyReport; over
 
 export function tidySummary(report: TidyReport): string {
   const parts: string[] = [];
-  if (report.expired) parts.push(`archived ${report.expired} expired note${report.expired === 1 ? "" : "s"}`);
-  if (report.duplicates) parts.push(`merged ${report.duplicates} duplicate${report.duplicates === 1 ? "" : "s"}`);
-  if (report.superseded) parts.push(`crossed out ${report.superseded} contradicted note${report.superseded === 1 ? "" : "s"}`);
-  if (report.organized) parts.push(`filed ${report.organized} note${report.organized === 1 ? "" : "s"} into topics`);
-  const head = parts.length ? parts.join(", ") : "nothing to tidy";
+  const add = (count: number | undefined, one: "memory.upkeep.summary.archived.one" | "memory.upkeep.summary.merged.one" | "memory.upkeep.summary.crossed.one" | "memory.upkeep.summary.filed.one", many: "memory.upkeep.summary.archived.many" | "memory.upkeep.summary.merged.many" | "memory.upkeep.summary.crossed.many" | "memory.upkeep.summary.filed.many") => {
+    if (count) parts.push(t(count === 1 ? one : many, { count }));
+  };
+  add(report.expired, "memory.upkeep.summary.archived.one", "memory.upkeep.summary.archived.many");
+  add(report.duplicates, "memory.upkeep.summary.merged.one", "memory.upkeep.summary.merged.many");
+  add(report.superseded, "memory.upkeep.summary.crossed.one", "memory.upkeep.summary.crossed.many");
+  add(report.organized, "memory.upkeep.summary.filed.one", "memory.upkeep.summary.filed.many");
+  const head = parts.length ? parts.join(", ") : t("memory.upkeep.summary.none");
   return head.charAt(0).toUpperCase() + head.slice(1);
 }
 
@@ -165,25 +169,20 @@ export function openMemoryLocation(botId: string, target: MemoryOpenTarget): Pro
 
 
 export function formatBytes(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`;
+  const locale = documentLanguage(activeLocale());
+  return bytes < 1024
+    ? `${new Intl.NumberFormat(locale).format(bytes)} B`
+    : `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(Math.round(bytes / 102.4) / 10)} KB`;
 }
 
 export function relativeTime(at: number, now = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - at) / 1000));
-  if (seconds < 45) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  const days = Math.round(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days} days ago`;
-  return new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
+  return localizedRelativeTime(at, documentLanguage(activeLocale()), now);
 }
 
 export function localizedRelativeTime(at: number, locale: string, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const language = documentLanguage(locale);
+  const formatter = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
   if (seconds < 45) return formatter.format(0, "second");
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return formatter.format(-minutes, "minute");
@@ -191,7 +190,7 @@ export function localizedRelativeTime(at: number, locale: string, now = Date.now
   if (hours < 24) return formatter.format(-hours, "hour");
   const days = Math.round(hours / 24);
   if (days < 7) return formatter.format(-days, "day");
-  return new Date(at).toLocaleDateString(locale, { month: "short", day: "numeric" });
+  return new Date(at).toLocaleDateString(language, { month: "short", day: "numeric" });
 }
 
 export type CapacityLevel = "ok" | "near" | "over";
@@ -205,16 +204,17 @@ export interface CapacityStatus {
 }
 
 export function capacityStatus(index: MemoryCapacity): CapacityStatus {
+  const number = (value: number) => new Intl.NumberFormat(documentLanguage(activeLocale())).format(value);
   const lineShare = index.maxLines ? index.lines / index.maxLines : 0;
   const byteShare = index.maxBytes ? index.bytes / index.maxBytes : 0;
   const level: CapacityLevel = index.truncated ? "over" : Math.max(lineShare, byteShare) >= 0.8 ? "near" : "ok";
-  const sentence = `${index.lines} of ${index.maxLines} lines · ${formatBytes(index.bytes)} of ${formatBytes(index.maxBytes)}. Only the first ${index.maxLines} lines load each turn.`;
+  const sentence = t("memory.capacity.sentence", { lines: number(index.lines), maxLines: number(index.maxLines), bytes: formatBytes(index.bytes), maxBytes: formatBytes(index.maxBytes), maxLoaded: number(index.maxLines) });
   let warning: string | null = null;
   if (index.truncated) {
     const missingLines = index.lines - index.loadedLines;
     warning = missingLines > 0
-      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation. ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
-      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation. The rest is not being loaded. Trim this file or move notes into a topic file.`;
+      ? t(missingLines === 1 ? "format.memory.truncatedLineOne" : "format.memory.truncatedLines", { lines: number(index.lines), loaded: number(index.loadedLines), missing: number(missingLines) })
+      : t("format.memory.truncatedBytes", { saved: formatBytes(index.bytes), loaded: formatBytes(index.loadedBytes) });
   }
   return { level, lineShare, byteShare, sentence, warning };
 }
@@ -226,32 +226,20 @@ export function fileLabel(path: string): string {
 }
 
 export function journalSummary(row: MemoryJournalRow, botName: string): string {
-  const who = row.actor === "bot" ? botName : row.actor === "import" ? "An import" : row.actor === "upkeep" ? "Memory upkeep" : "You";
+  const who = row.actor === "bot" ? botName : row.actor === "import" ? t("memory.journal.actor.import") : row.actor === "upkeep" ? t("memory.journal.actor.upkeep") : t("memory.journal.actor.you");
   const file = fileLabel(row.path);
-  const isIndex = row.path === MEMORY_INDEX;
-  const topic = isIndex ? file : row.path.startsWith("memory/log/") ? `the ${file} log` : `the ${file} topic`;
-  if (row.kind === "created") return `${who} created ${topic}${row.added ? ` with ${plural(row.added, "line")}` : ""}`;
-  if (row.kind === "deleted") return `${who} deleted ${topic}`;
-  if (row.added && !row.removed) return `${who} added ${plural(row.added, "line")} to ${topic}`;
-  if (row.removed && !row.added) return `${who} removed ${plural(row.removed, "line")} from ${topic}`;
-  return `${who} rewrote ${plural(Math.max(row.added, row.removed), "line")} in ${topic}`;
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+  const topic = row.path === MEMORY_INDEX ? file : row.path.startsWith("memory/log/") ? t("memory.journal.log", { file }) : t("memory.journal.topic", { file });
+  const lines = (count: number) => t(count === 1 ? "memory.journal.line.one" : "memory.journal.line.many", { count });
+  if (row.kind === "created") return t("memory.journal.created", { who, topic, detail: row.added ? t("memory.journal.withLines", { lines: lines(row.added) }) : "" });
+  if (row.kind === "deleted") return t("memory.journal.deleted", { who, topic });
+  if (row.added && !row.removed) return t("memory.journal.added", { who, lines: lines(row.added), topic });
+  if (row.removed && !row.added) return t("memory.journal.removed", { who, lines: lines(row.removed), topic });
+  return t("memory.journal.rewrote", { who, lines: lines(Math.max(row.added, row.removed)), topic });
 }
 
 export function journalSource(row: MemoryJournalRow): string | null {
-  if (row.via === "revert") return "undo";
-  if (row.via === "disk") return "changed outside the app";
-  if (row.via === "tidy") return "tidy-up";
-  if (row.via === "organize") return "filed into topics";
-  if (row.via === "capture") return row.threadTitle ? `noticed in chat “${row.threadTitle}”` : "noticed in a chat";
-  if (row.threadTitle) return `from chat “${row.threadTitle}”`;
-  if (row.actor === "bot") return "during a task";
-  if (row.via === "ui") return "in Settings";
-  if (row.via === "api") return "through the API";
-  return null;
+  const key = journalSourceKey(row);
+  return key ? t(key, row.threadTitle ? { title: row.threadTitle } : undefined) : null;
 }
 
 export function journalSourceKey(row: MemoryJournalRow): "memory.source.undo" | "memory.source.disk" | "memory.source.tidy" | "memory.source.organize" | "memory.source.capture" | "memory.source.captureWithTitle" | "memory.source.chat" | "memory.source.task" | "memory.source.settings" | "memory.source.api" | null {
@@ -268,9 +256,9 @@ export function journalSourceKey(row: MemoryJournalRow): "memory.source.undo" | 
 }
 
 export function fileManagerLabel(platform: string | undefined): string {
-  if (platform === "darwin") return "Show in Finder";
-  if (platform === "win32") return "Show in Explorer";
-  return "Show in file manager";
+  if (platform === "darwin") return t("format.memory.showInFinder");
+  if (platform === "win32") return t("format.memory.showInExplorer");
+  return t("format.memory.showInFileManager");
 }
 
 export function topicFileName(input: string): string | null {

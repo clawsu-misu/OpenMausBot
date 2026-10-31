@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { setLocale } from "@/lib/i18n";
 
 import { visibleMessages, type Bot, type Message } from "@/state/store";
 import { composeMessage, fileAttachment } from "./composer-attachments";
@@ -16,10 +17,12 @@ import {
 
 describe("export-transcript", () => {
   const fixedDate = new Date("2026-09-08T12:00:00Z");
+  beforeEach(() => setLocale("en"));
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
+    setLocale("en");
   });
 
   it("formats an empty conversation cleanly", () => {
@@ -310,5 +313,15 @@ describe("export-transcript", () => {
     const formattedTime = formatMessageTime(fixedDate.getTime());
     expect(typeof formattedTime).toBe("string");
     expect(formattedTime.length).toBeGreaterThan(0);
+  });
+
+  it("formats exported dates and message times in the selected app language", () => {
+    setLocale("zh");
+    expect(formatExportDate(fixedDate)).toBe(new Intl.DateTimeFormat("zh", { dateStyle: "long", timeStyle: "short" }).format(fixedDate));
+    expect(formatMessageTime(fixedDate.getTime())).toBe(new Intl.DateTimeFormat("zh", { hour: "numeric", minute: "2-digit" }).format(fixedDate));
+    const markdown = formatTranscriptMarkdown({ title: "团队", messages: [], isGroup: true, exportedAt: fixedDate });
+    expect(markdown).toContain("# 群聊：团队");
+    expect(markdown).toContain("导出时间：");
+    expect(markdown).toContain("此会话中还没有消息。");
   });
 });

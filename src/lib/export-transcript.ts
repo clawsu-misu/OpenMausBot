@@ -1,6 +1,9 @@
 import type { Message } from "@/state/store";
 import { splitTranscriptAttachments } from "./composer-attachments";
 import { copyText } from "./copy-text";
+import { activeLocale, documentLanguage, t } from "@/lib/i18n";
+
+const locale = () => documentLanguage(activeLocale());
 
 export interface ExportTranscriptOptions {
   title: string;
@@ -13,7 +16,7 @@ export interface ExportTranscriptOptions {
 
 export function formatExportDate(date: Date): string {
   try {
-    return date.toLocaleString("en-US", {
+    return date.toLocaleString(locale(), {
       dateStyle: "long",
       timeStyle: "short",
     });
@@ -24,7 +27,7 @@ export function formatExportDate(date: Date): string {
 
 export function formatMessageTime(timestamp: number): string {
   try {
-    return new Date(timestamp).toLocaleTimeString("en-US", {
+    return new Date(timestamp).toLocaleTimeString(locale(), {
       hour: "numeric",
       minute: "2-digit",
     });
@@ -57,22 +60,22 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     includeTools = true,
   } = options;
 
-  const headerTitle = isGroup ? `# Group: ${markdownLabel(title)}` : `# Thread with ${markdownLabel(title)}`;
+  const headerTitle = `# ${t(isGroup ? "format.transcript.group" : "format.transcript.thread", { title: markdownLabel(title) })}`;
   const lines: string[] = [
     headerTitle,
-    `_Exported on ${formatExportDate(exportedAt)}_`,
+    `_${t("format.transcript.exported", { date: formatExportDate(exportedAt) })}_`,
     "",
     "---",
   ];
 
   if (!messages || messages.length === 0) {
-    lines.push("", "_No messages in this conversation yet._");
+    lines.push("", `_${t("format.transcript.empty")}_`);
     return lines.join("\n");
   }
 
   for (const message of messages) {
     const isUser = message.role === "user";
-    const author = isUser ? "User" : message.from?.name || botName || "Assistant";
+    const author = isUser ? t("format.transcript.user") : message.from?.name || botName || t("format.transcript.assistant");
     const time = formatMessageTime(message.at);
 
     const messageLines: string[] = [];
@@ -85,11 +88,11 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
 
     // Export display names, never private storage paths or actionable image URLs.
     for (const attachment of [...(userContent?.images ?? []), ...(userContent?.files ?? [])]) {
-      messageLines.push(`📎 _Attachment:_ ${inlineCode(attachment.name)}`);
+      messageLines.push(`📎 _${t("format.transcript.attachment")}:_ ${inlineCode(attachment.name)}`);
     }
     if (message.attachments && message.attachments.length > 0) {
       for (const att of message.attachments) {
-        messageLines.push(`📎 _Attachment:_ ${inlineCode(att.kind === "file" ? att.name : att.path)}`);
+        messageLines.push(`📎 _${t("format.transcript.attachment")}:_ ${inlineCode(att.kind === "file" ? att.name : att.path)}`);
       }
     }
 
@@ -100,11 +103,11 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
       }
       if (message.card.options && message.card.options.length > 0) {
         cardLines.push(
-          `> Options: ${message.card.options.map(inlineCode).join(", ")}`,
+          `> ${t("format.transcript.options")}: ${message.card.options.map(inlineCode).join(", ")}`,
         );
       }
       if (message.card.answered) {
-        cardLines.push(`> Selected: **${markdownLabel(message.card.answered)}**`);
+        cardLines.push(`> ${t("format.transcript.selected")}: **${markdownLabel(message.card.answered)}**`);
       }
       messageLines.push(cardLines.join("\n"));
     }
@@ -112,11 +115,11 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     if (includeTools && message.kind === "activity" && message.tool) {
       const toolLabel = message.tool.spoken || message.tool.name;
       const statusIcon = message.tool.ok === false ? "❌" : "🔧";
-      messageLines.push(`> ${statusIcon} _Used tool:_ ${inlineCode(toolLabel)}`);
+      messageLines.push(`> ${statusIcon} _${t("format.transcript.usedTool")}:_ ${inlineCode(toolLabel)}`);
     }
 
     if (message.kind === "screen" && (message.hasImage || message.png)) {
-      messageLines.push("📷 _Screen capture (image not included in Markdown export)._");
+      messageLines.push(`📷 _${t("format.transcript.screenCapture")}_`);
     }
 
     if (messageLines.length > 0) {

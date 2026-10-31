@@ -4,6 +4,7 @@ import type { RuntimeEvent } from "./contracts.ts";
 import { DEFAULT_QUIET_NOTICE_MS } from "./drivers/acp/quiet-status.ts";
 import { createFirstReplyRescue, DEFAULT_FIRST_REPLY_NOTICE_MS } from "./first-reply-rescue.ts";
 import type { Message } from "./store.ts";
+import { addServerLinePacks } from "./server-lines.ts";
 
 const THREAD = "thread-1";
 const BOT = { id: "bot-1", name: "Maus", modelSelection: { instanceId: "opencodeGo", model: "free" } };
@@ -13,7 +14,7 @@ const event = (fields: Record<string, unknown>): RuntimeEvent =>
 let currentTurn = "turn-1";
 const started = (turnId = "turn-1", threadId = THREAD) => { currentTurn = turnId; return event({ type: "turn.started", turnId, threadId }); };
 
-function harness(options: { quiet?: boolean; speaker?: { botId: string; name: string; color: string }; live?: () => boolean; leftOpen?: Message[] } = {}) {
+function harness(options: { quiet?: boolean; speaker?: { botId: string; name: string; color: string }; live?: () => boolean; leftOpen?: Message[]; lineLanguage?: string } = {}) {
   const rows = new Map<string, Message[]>();
   const append = vi.fn((threadId: string, message: Omit<Message, "id" | "at">) => {
     const row = { ...message, id: `m-${(rows.get(threadId)?.length ?? 0) + 1}`, at: Date.now() } as Message;
@@ -39,6 +40,7 @@ function harness(options: { quiet?: boolean; speaker?: { botId: string; name: st
     speaker: () => options.speaker,
     runningEngine: () => "opencodeGo",
     engineName: (instanceId) => (instanceId === "opencodeGo" ? "OpenCode" : instanceId),
+    lineLanguage: () => options.lineLanguage,
     quiet: () => options.quiet === true,
     live: (_threadId, _turnId) => options.live?.() ?? true,
     leftOpen: () => (options.leftOpen ?? []).map((message) => ({ threadId: THREAD, message })),
@@ -58,6 +60,18 @@ afterEach(() => {
 });
 
 describe("first-reply rescue", () => {
+  it("writes the notice in the person's application language", () => {
+    addServerLinePacks({ zh: {
+      "server.rooms.firstReplyWaiting": "提示：{bot}还没有收到{ai}的回复。",
+      "server.rooms.firstReplyOver": "提示：{bot}没有收到{ai}的回复。",
+      "server.rooms.firstReplySettled": "提示：{ai}在短暂等待后已作答。",
+    } });
+    const { rescue, rows } = harness({ lineLanguage: "zh" });
+    rescue.onEvent(started());
+    vi.advanceTimersByTime(DEFAULT_FIRST_REPLY_NOTICE_MS);
+    expect(rows()[0]?.tool?.name).toBe("提示：Maus还没有收到OpenCode的回复。");
+  });
+
   it("posts one notice 20 s into a turn that has heard nothing from the AI", () => {
     const { rescue, rows } = harness();
     rescue.onEvent(started());

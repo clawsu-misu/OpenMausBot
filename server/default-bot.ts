@@ -5,6 +5,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DEFAULT_BOT_COLOR, DEFAULT_BOT_NAME, defaultBotPerson } from "../shared/default-bot.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
+import { serverLine } from "./server-lines.ts";
 
 export type DefaultBotStore = Pick<Store, "bots" | "bot" | "createBot" | "patchBot" | "appendMessage" | "messagesFor" | "createTask" | "setChiefOfStaff">;
 
@@ -34,8 +35,8 @@ export function ownsDefaultBot(bot: BotRecord | null | undefined, email: string 
 
 /** The English intro: who MausBot is, what it does here, and that it is looking around (its follow-up comes after, from
  * helper-followup.ts). Clients that know `helperIntro` say it in the viewer's own language. */
-export function helperIntroMessage(bot: Pick<BotRecord, "name" | "chiefOfStaff">, team?: string | null): Omit<Message, "id" | "at"> {
-  const title = bot.chiefOfStaff ? `Hey! I'm ${bot.name}. I'm new here.` : `Hi! I'm ${bot.name}, your helper for everything here.`;
+export function helperIntroMessage(bot: Pick<BotRecord, "name" | "chiefOfStaff">, team?: string | null, language?: string): Omit<Message, "id" | "at"> {
+  const title = serverLine(language, bot.chiefOfStaff ? "server.routines.defaultBot.chiefTitle" : "server.routines.defaultBot.title", { name: bot.name });
   const subtitle = [
     bot.chiefOfStaff
       ? "I'm here to be your Chief of Staff. I can manage your other bots. Task me with anything. I'll make sure it gets to the right bot."
@@ -83,17 +84,17 @@ export function seededMausBot(bots: readonly BotRecord[]): BotRecord | undefined
 
 /** Puts the intro where its person sees it next: in its open conversation while nobody has written there, else at the
  * top of a new one, so no earlier message moves. */
-function introduce(store: DefaultBotStore, bot: BotRecord, team?: string | null): void {
+function introduce(store: DefaultBotStore, bot: BotRecord, team?: string | null, language?: string): void {
   const untouched = !store.messagesFor(bot.threadId).some((message) => message.role === "user");
   const threadId = untouched ? bot.threadId : store.createTask(bot.id, `What ${bot.name} can do`)?.threadId;
-  if (threadId) store.appendMessage(threadId, helperIntroMessage(bot, team));
+  if (threadId) store.appendMessage(threadId, helperIntroMessage(bot, team, language));
 }
 
 /** The first message a new MausBot says instead of its intro. */
 export type DefaultBotIntro = (bot: BotRecord) => Omit<Message, "id" | "at">;
 
 /** A new MausBot, with its intro as its first message. On a Team Cloud it is its member's alone. */
-export function createDefaultBot(store: DefaultBotStore, options: { person?: string; team?: string | null; chief?: (id: string) => void; intro?: DefaultBotIntro } = {}): BotRecord {
+export function createDefaultBot(store: DefaultBotStore, options: { person?: string; team?: string | null; chief?: (id: string) => void; intro?: DefaultBotIntro; language?: string } = {}): BotRecord {
   const person = options.person?.trim().toLowerCase() ?? "";
   const taken = new Set(person ? [] : store.bots.map((bot) => bot.name.trim().toLowerCase()));
   const created = store.createBot({
@@ -103,7 +104,7 @@ export function createDefaultBot(store: DefaultBotStore, options: { person?: str
   }, { seedMessages: false });
   options.chief?.(created.id);
   const bot = store.patchBot(created.id, { defaultBot: person ? { person } : {} }) ?? created;
-  store.appendMessage(bot.threadId, options.intro?.(bot) ?? helperIntroMessage(bot, options.team));
+  store.appendMessage(bot.threadId, options.intro?.(bot) ?? helperIntroMessage(bot, options.team, options.language));
   return bot;
 }
 
@@ -111,7 +112,7 @@ export function createDefaultBot(store: DefaultBotStore, options: { person?: str
  * install's own adopted, or a new one. A MausBot that is gone is never made again. Two marked ones keep the oldest. A
  * place with no Chief of Staff at all gets MausBot as its Chief, so someone keeps an eye on the day; one that has a
  * Chief keeps it. */
-export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: string; person?: string; team?: string | null }): BotRecord | null {
+export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: string; person?: string; team?: string | null; language?: string }): BotRecord | null {
   const person = options.person?.trim().toLowerCase() ?? "";
   const marked = store.bots.filter((bot) => bot.defaultBot && defaultBotPerson(bot) === person)
     .sort((a, b) => a.createdAt - b.createdAt);
@@ -127,9 +128,9 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
   if (adoptable) {
     bot = store.patchBot(adoptable.id, { defaultBot: {}, ...(adoptable.color === STARTER_COLOR ? { color: DEFAULT_BOT_COLOR } : {}) }) ?? adoptable;
     chief?.(bot.id);
-    introduce(store, bot, options.team);
+    introduce(store, bot, options.team, options.language);
   } else {
-    bot = createDefaultBot(store, { person, team: options.team, chief });
+    bot = createDefaultBot(store, { person, team: options.team, chief, language: options.language });
   }
   remember(options.dataDir, person, bot.id);
   return bot;

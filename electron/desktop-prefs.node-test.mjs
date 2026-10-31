@@ -280,10 +280,13 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   localOrigin.setLocalOrigin(LOCAL);
   const sent = [], window = name => ({ isDestroyed: () => name === "closed", webContents: { send: (...message) => sent.push([name, ...message]) } });
   const windows = [window("team"), window("home"), window("closed")];
+  const trayLanguages = [];
+  let menuRefreshes = 0;
   let switched = async id => { calls.push(["switch", id]); }, loads = true;
   const context = vm.createContext({
-    registerDesktopPrefs: value => { options = value; }, createDesktopPrefs: store => ({ store }), jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
-    path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
+    registerDesktopPrefs: value => { options = value; }, createDesktopPrefs: store => ({ store, language: () => "zh" }), jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
+    path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data", getLocale: () => "en-US" }, desktopDataDir: () => "/home/.openmausbot",
+    desktopTray: { setLanguage: language => trayLanguages.push(language) }, refreshApplicationMenu: () => { menuRefreshes++; },
     navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow: { webContents: contents }, environmentsState: { environments: [{ id: "vps", name: "VPS", origin: VPS }], activeId: "vps" },
@@ -307,6 +310,8 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   assert.equal(await options.cloudOffered(), true);
   assert.deepEqual(calls, ["restored", "offers"]);
   options.languageChanged("en", windows[0].webContents);
+  assert.deepEqual(trayLanguages, ["zh", "en"]);
+  assert.equal(menuRefreshes, 1);
   assert.deepEqual(sent, [["home", "desktop-language:changed", "en"], ["rail", "desktop-language:changed", "en"]], "every other open window hears the pick, and the window's rail");
   const navigate = main.slice(main.indexOf("function navigateMainWindow(url) {"), main.indexOf("\n}\n", main.indexOf("function navigateMainWindow(url) {")) + 3);
   const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });

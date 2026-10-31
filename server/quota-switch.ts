@@ -14,6 +14,7 @@ import type { WorkOrigin } from "./peer-provenance.ts";
 import type { BotRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { TurnStops } from "./turn-outcome.ts";
 import { signedOutStop, type LimitTakeover, type TakeoverScope } from "./host/limit-takeover.ts";
+import { serverLine } from "./server-lines.ts";
 
 export interface QuotaSwitchEngine {
   instanceId: string;
@@ -52,6 +53,7 @@ export interface QuotaSwitchDeps {
   /** A line spoken on a Live call is resent as spoken, so its words stay out of the log. */
   resend: (botId: string, threadId: string, message: Message, replyTo: Message | undefined, spoken: { via?: "call"; callId?: string }) => Promise<unknown>;
   enabled?: () => boolean;
+  language?: (threadId: string) => string | undefined;
   after?: (ms: number, run: () => void) => { cancel(): void };
 }
 
@@ -104,6 +106,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     // `notice:` makes it a status row every client shows, never a folded tool step; `setup`: signing in fixes it.
     store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok, ...(setup ? { setup: true } : {}) } });
   };
+  const line = (threadId: string, key: Parameters<typeof serverLine>[1], params?: Readonly<Record<string, string | number>>) => serverLine(deps.language?.(threadId), key, params);
 
   const openCard = (threadId: string): Message | undefined => store.messagesFor(threadId)
     .find((message) => message.card?.quotaSwitch && !message.card.answered && !message.card.dismissed);
@@ -169,22 +172,22 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     }
     deps.takeover?.moved(botId, threadId, before.modelSelection, checked.selection, resetsAt, scope);
     const name = engine.instanceId === current.instanceId ? `${nameOf(engine)} ${checked.selection.model}` : nameOf(engine);
-    const why = scope === "signed-out" ? `while ${nameOf(current)} is signed out` : "after hitting the usage limit";
+    const why = line(threadId, scope === "signed-out" ? "server.quota.whileSignedOut" : "server.quota.afterLimit", { engine: nameOf(current) });
     const held = heldBy(botId, threadId, rootOf(threadId, request));
     const original = held ? undefined : resendable(store, threadId, request.messageId);
-    if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true);
-    else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true);
-    else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true);
+    if (held === "card") notice(threadId, line(threadId, "server.quota.switchedCard", { name }), true);
+    else if (held === "runtime") notice(threadId, line(threadId, "server.quota.switchedRuntime", { name }), true);
+    else if (held === "busy") notice(threadId, line(threadId, "server.quota.switchedBusy", { name }), true);
     else if (held === "question") {
-      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false);
+      notice(threadId, line(threadId, "server.quota.switchedQuestion", { name }), false);
     } else if (!original) {
-      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false);
+      notice(threadId, line(threadId, "server.quota.switchedMissing", { name }), false);
     } else {
-      notice(threadId, `continuing on ${name} ${why}`, true);
+      notice(threadId, line(threadId, "server.quota.continuing", { name, why }), true);
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
-        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+        if (store.taskByThread(botId, threadId)) notice(threadId, line(threadId, "server.quota.couldNotContinue", { name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) }), false);
       }
     }
     return true;
@@ -282,54 +285,54 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       return false;
     };
     const closed = () => ({ answered: "unavailable", dismissed: true });
-    if (!enabled()) return refuse("continuing with another AI is switched off — nothing switched.", closed);
+    if (!enabled()) return refuse(line(threadId, "server.quota.disabled"), closed);
     const engines = deps.registry.instances();
     const engine = engines.find((candidate) => candidate.instanceId === chosen.instanceId);
     if (!engine) {
       const rest = (offer()?.quotaSwitch!.engines ?? []).filter((other) => other.instanceId !== chosen.instanceId);
-      if (!rest.length) return refuse(`${chosen.name} is no longer configured, and the card offered no other AI — nothing switched.`, closed);
-      return refuse(`${chosen.name} is no longer configured — nothing switched.`,
+      if (!rest.length) return refuse(line(threadId, "server.quota.noOther", { name: chosen.name }), closed);
+      return refuse(line(threadId, "server.quota.unconfigured", { name: chosen.name }),
         (card) => ({ options: [...rest.map((other) => other.name), NOT_NOW], quotaSwitch: { ...card.quotaSwitch!, engines: rest } }));
     }
     const before = store.projectBotForTask(botId, threadId);
     if (!before) return false;
     const current = engines.find((candidate) => candidate.instanceId === before.modelSelection.instanceId);
-    if (!current) return refuse("this conversation's own AI is no longer configured here, so no other AI can be checked against it — nothing switched. Choose a model for this conversation instead.", closed);
+    if (!current) return refuse(line(threadId, "server.quota.currentMissing"), closed);
     const selection = await takeover(engine, before, current);
     // No await from here to the resend: the gate, the switch and the resend must see one state.
     const card = offer();
     const bot = store.projectBotForTask(botId, threadId);
     if (!card || !bot) return false;
-    if (selection === "timed-out") return refuse(`${chosen.name} did not answer in time — nothing switched. Try again in a moment.`);
-    if (!selection) return refuse(`${chosen.name} is no longer available — nothing switched.`);
+    if (selection === "timed-out") return refuse(line(threadId, "server.quota.timedOut", { name: chosen.name }));
+    if (!selection) return refuse(line(threadId, "server.quota.unavailable", { name: chosen.name }));
     const already = bot.modelSelection.instanceId === selection.instanceId;
     if (!already) {
       const checked = deps.gate(bot, selection);
-      if (!checked.ok) return refuse(`could not switch to ${chosen.name} — ${checked.error}`);
+      if (!checked.ok) return refuse(line(threadId, "server.quota.switchError", { name: chosen.name, error: checked.error }));
       try {
         store.switchTaskModel(botId, threadId, checked.selection, false, false, deps.reset?.(bot.modelSelection, checked.selection));
       } catch {
-        return refuse(`could not switch to ${chosen.name} — the model switch could not be saved.`);
+        return refuse(line(threadId, "server.quota.saveError", { name: chosen.name }));
       }
     }
     store.patchMessage(threadId, cardId, { card: { ...card, answered: "answer", answeredText: chosen.name } });
-    const now = `${already ? "already on" : "switched to"} ${chosen.name}`;
+    const now = line(threadId, already ? "server.quota.alreadyOn" : "server.quota.switchedTo", { name: chosen.name });
     const held = heldBy(botId, threadId, card.quotaSwitch!.rootId);
     const original = held ? undefined : resendable(store, threadId, card.quotaSwitch!.messageId);
-    if (held === "card") notice(threadId, `${now}. Your request waits on a card above and continues on ${chosen.name} once you act on it.`, true);
-    else if (held === "runtime") notice(threadId, `${now}. Your request is still under way here and continues on ${chosen.name}.`, true);
-    else if (held === "busy") notice(threadId, `${now}. This conversation is working, so your message was not sent again.`, true);
+    if (held === "card") notice(threadId, line(threadId, "server.quota.answeredCard", { now, name: chosen.name }), true);
+    else if (held === "runtime") notice(threadId, line(threadId, "server.quota.answeredRuntime", { now, name: chosen.name }), true);
+    else if (held === "busy") notice(threadId, line(threadId, "server.quota.answeredBusy", { now }), true);
     else if (held === "question") {
-      notice(threadId, `${now}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again — answer it, then send your message again.`, false);
+      notice(threadId, line(threadId, "server.quota.answeredQuestion", { now }), false);
     } else if (!original) {
-      notice(threadId, `${now}, but the message that hit quota could not be found to resend — send it again.`, false);
+      notice(threadId, line(threadId, "server.quota.answeredMissing", { now }), false);
     } else {
-      notice(threadId, `continuing on ${chosen.name} after hitting quota`, true);
+      notice(threadId, line(threadId, "server.quota.continueAfterLimit", { name: chosen.name }), true);
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
         if (store.taskByThread(botId, threadId)) {
-          notice(threadId, `could not continue on ${chosen.name} — ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+          notice(threadId, line(threadId, "server.quota.couldNotContinueDash", { name: chosen.name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) }), false);
         }
       }
     }

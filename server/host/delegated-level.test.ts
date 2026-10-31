@@ -5,7 +5,7 @@ import type { BotRecord } from "../store.ts";
 import { createDelegatedLevel, type DelegatedLevelDeps, type Hop } from "./delegated-level.ts";
 
 // Clive (a Chief) handed work to Ada, and Ada's turn hands work on: the chain is the hand-off nodes' parents.
-function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>, guest = new Set<string>()) {
+function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>, guest = new Set<string>(), line?: DelegatedLevelDeps["line"]) {
   const bots: Record<string, Partial<BotRecord>> = {
     clive: { id: "clive", name: "Clive", chiefOfStaff: true }, ada: { id: "ada", name: "Ada" }, bea: { id: "bea", name: "Bea" }, ola: { id: "ola", name: "Ola" },
   };
@@ -21,7 +21,7 @@ function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>,
   const level = (botId: string, threadId: string) => levels[`${botId}:${threadId}`] ?? levels[botId] ?? "ask";
   const delegated = createDelegatedLevel({
     store, node: id => nodes[id], sourceLevel: level, turnLevel: (bot, _peer, threadId) => level(bot.id, threadId),
-    driverKind: () => "claudeAgent", guestDriven: threadId => guest.has(threadId),
+    driverKind: () => "claudeAgent", guestDriven: threadId => guest.has(threadId), line,
   });
   return { ...delegated, patched, lines, bot: (id: string) => bots[id] as BotRecord };
 }
@@ -48,6 +48,24 @@ describe("a Chief's level, every hop down", () => {
       "Approve for me — delegated by Clive, a Chief of Staff on Approve for me",
       "Approve for me — delegated by Ada, from Clive, a Chief of Staff on Approve for me",
     ]);
+  });
+
+  it("formats the delegated approval level in the recipient's language", () => {
+    const labels = {
+      "server.rooms.delegatedLevel.ask": "请求批准",
+      "server.rooms.delegatedLevel.edits": "自动接受编辑",
+      "server.rooms.delegatedLevel.auto": "代我批准",
+      "server.rooms.delegatedLevel.full": "完全访问",
+    };
+    const w = world({ "clive:clive-chat": "auto" }, chain, new Set(), (_thread, key, params) => {
+      if (key in labels) return labels[key as keyof typeof labels];
+      const template = key === "server.rooms.delegatedApproval"
+        ? "权限已设为{level}；{sender}已转交此权限（{level}）"
+        : "首席协调员{chief}已将权限设为{level}；{sender}已转交此权限（{level}）";
+      return template.replace(/\{(level|sender|chief)\}/g, (_match, name: "level" | "sender" | "chief") => String(params[name] ?? ""));
+    });
+    w.apply(w.bot("clive"), "clive-chat", "root", w.bot("ada"), "ada-work");
+    expect(w.lines).toEqual(["权限已设为代我批准；Clive已转交此权限（代我批准）"]);
   });
 
   it("runs a room turn at the level its hand-off's chain brings down, and a guest's room at Ask", () => {

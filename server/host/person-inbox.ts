@@ -21,6 +21,7 @@ import { isRestricted } from "../bot-visibility.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import { peerStatus, peerStatusWords } from "../peer-roster.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
+import { serverLine, type LineLanguage } from "../server-lines.ts";
 import type { Representative, SharedFacts } from "./representative.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -114,6 +115,7 @@ export interface PersonInboxDeps {
   /** What waits on this inbox's person may have changed: its bot goes out to them again. */
   changed?(threadId: string): void;
   now?: () => number;
+  lineLanguage?: LineLanguage;
 }
 
 export function createPersonInbox(deps: PersonInboxDeps) {
@@ -325,7 +327,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   function answerItem(item: Item, text: string, by: "person" | "assistant"): Passed {
     const replier = deps.person(item.person);
     if (!replier) return { status: 410, text: "This inbox's person has left the team." };
-    const label = by === "assistant" ? `${replier.name}'s assistant answered` : `${replier.name} replied`;
+    const label = serverLine(deps.lineLanguage?.(item.person), by === "assistant" ? "server.inbox.assistantAnswered" : "server.inbox.personReplied", { name: replier.name });
     const relay: Relay = { kind: by === "assistant" ? "assistant" : "reply", email: replier.email, name: replier.name };
     let passed: Passed;
     if (item.to === "bot" && item.origin) {

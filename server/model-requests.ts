@@ -5,6 +5,7 @@ import { newId } from "./contracts.ts";
 import { UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { BotRecord } from "./store.ts";
+import { serverLine } from "./server-lines.ts";
 
 const MAX_REASON = 500;
 const STALE = "This bot's default model changed after this card was prepared. Ask the bot to review it and propose again.";
@@ -115,18 +116,17 @@ export function modelCardCopy(args: {
   selection: ModelSelection;
   reason: string;
   capabilityLines: string[];
+  language?: string;
 }): { title: string; summary: string; detail: string } {
-  const title = args.crossBot
-    ? "Change @" + args.targetName + "'s default AI and model?"
-    : "Change " + args.targetName + "'s default AI and model?";
+  const title = serverLine(args.language, "server.routines.model.title", { target: args.targetName, at: args.crossBot ? "@" : "" });
   const lines: string[] = args.crossBot
-    ? ["Whose default model: @" + args.targetName, "Why: " + args.reason]
-    : ["Why: " + args.reason];
-  lines.push("Default AI and model: " + JSON.stringify(args.before) + " → " + JSON.stringify(args.selection));
+    ? [serverLine(args.language, "server.routines.model.whose", { target: args.targetName }), serverLine(args.language, "server.routines.model.why", { reason: args.reason })]
+    : [serverLine(args.language, "server.routines.model.why", { reason: args.reason })];
+  lines.push(serverLine(args.language, "server.routines.model.change", { before: JSON.stringify(args.before), after: JSON.stringify(args.selection) }));
   lines.push(...args.capabilityLines);
-  lines.push("Default models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
-  lines.push("Nothing runs.");
-  return { title, summary: title + " · default AI and model", detail: lines.join("\n") };
+  lines.push(serverLine(args.language, "server.routines.model.scope"));
+  lines.push(serverLine(args.language, "server.routines.model.nothingRuns"));
+  return { title, summary: `${title} · ${serverLine(args.language, "server.routines.model.label")}`, detail: lines.join("\n") };
 }
 
 export class ModelRequestService {
@@ -154,6 +154,7 @@ export class ModelRequestService {
     targetBotId?: string;
     selection: unknown;
     reason: unknown;
+    language?: string;
     from?: { botId: string; name: string; color: string };
   }): { requestId: string; messageId: string; title: string; summary: string; detail: string } {
     return this.prepare(args);
@@ -204,7 +205,7 @@ export class ModelRequestService {
       selection,
       before,
     };
-    const copy = modelCardCopy({ targetName, crossBot, before, selection, reason, capabilityLines });
+    const copy = modelCardCopy({ targetName, crossBot, before, selection, reason, capabilityLines, language: args.language });
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
     const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);

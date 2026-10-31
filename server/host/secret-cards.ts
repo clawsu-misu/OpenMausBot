@@ -36,6 +36,7 @@ import {
 } from "../phone-secret.ts";
 import type { BotLogins } from "../bot-logins.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
+import { serverLine } from "../server-lines.ts";
 
 export const phoneSecretEnvelopeSchema = z.object({
   version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
@@ -63,6 +64,7 @@ export interface SecretCardsDeps {
   layerFolder(botId: string, threadId: string): string;
   /** The Local VM (its target key) this conversation's turn holds right now, if any. */
   turnVm(threadId: string): string | undefined;
+  language?(threadId: string): string | undefined;
 }
 
 export type SecretCards = ReturnType<typeof createSecretCards>;
@@ -205,8 +207,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return `${threadId}:${messageId}:${requestKey}`;
   }
 
-  function credentialDesktopHandoff(label: string): string {
-    return `Securely provide the ${label} from OpenMausBot on your phone or computer. It is never added to chat.`;
+  function credentialDesktopHandoff(label: string, threadId: string): string {
+    return serverLine(deps.language?.(threadId), "server.routines.secret.handoff", { label });
   }
 
   function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
@@ -360,7 +362,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const message = store.appendMessage(fromThreadId, {
       role: "bot",
       kind: "secret",
-      text: credentialDesktopHandoff(target.label),
+      text: credentialDesktopHandoff(target.label, fromThreadId),
       ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
       secret: {
         target: credentialId,
@@ -395,7 +397,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const message = store.appendMessage(threadId, {
       role: "bot",
       kind: "secret",
-      text: credentialDesktopHandoff(asked.label),
+      text: credentialDesktopHandoff(asked.label, threadId),
       ...(room ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
       secret: {
         target: CUSTOM_SECRET_TARGET,

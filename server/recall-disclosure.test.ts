@@ -42,5 +42,7 @@ describe("recallCrossingLabel", () => {
   it("says what crossed, and counts in plain words", () => {
     expect(recallCrossingLabel("Cia", 1)).toBe("Cia recalled 1 message from its private chat with you");
     expect(recallCrossingLabel("Cia", 3)).toBe("Cia recalled 3 messages from its private chat with you");
+    expect(recallCrossingLabel("小鼠", 2, (_key, { bot, count }) => `${bot} 从与你的私聊中回忆了 ${count} 条消息`))
+      .toBe("小鼠 从与你的私聊中回忆了 2 条消息");
   });
 });

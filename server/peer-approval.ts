@@ -5,6 +5,7 @@ import { optionCardsForTools } from "./message-db.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
+import { serverLine, type LineLanguage } from "./server-lines.ts";
 
 export { peerAllowKey } from "./peer-approval-key.ts";
 
@@ -30,6 +31,7 @@ export interface ApprovalBus {
   broadcast: (payload: Record<string, unknown>) => void;
   notify?: (notification: Notification | null) => void;
   autoApply?: (botId: string, threadId: string) => boolean;
+  lineLanguage?: LineLanguage;
   onPeerApprovalPending?: (from: BotRecord, target: PeerApprovalTarget, action: PeerAction, sourceThreadId: string, message: string) => void;
 }
 
@@ -72,12 +74,6 @@ export interface PeerApprovalTarget {
   name: string;
 }
 
-const ACTION_VERB: Record<PeerAction, string> = {
-  ask_bot: "contact",
-  delegate_bot: "delegate to",
-  post_to_room: "post in",
-};
-
 function pushApprovalCard(
   bus: ApprovalBus,
   from: BotRecord,
@@ -88,13 +84,20 @@ function pushApprovalCard(
   sourceThreadId: string,
 ): Message {
   const subtitle = message.length > 200 ? `${message.slice(0, 200)}…` : message;
+  const language = bus.lineLanguage?.(sourceThreadId);
+  const titleKey = action === "ask_bot" ? "server.peerApproval.askBot"
+    : action === "delegate_bot" ? "server.peerApproval.delegateBot" : "server.peerApproval.postToRoom";
   const note = bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "options",
     card: {
-      title: `@${from.name} wants to ${ACTION_VERB[action]} ${action === "post_to_room" ? `“${target.name}”` : `@${target.name}`}`,
+      title: serverLine(language, titleKey, { sender: from.name, target: target.name }),
       subtitle,
-      options: ["Allow", "Deny", "Always allow"],
+      options: [
+        serverLine(language, "server.peerApproval.allow"),
+        serverLine(language, "server.peerApproval.deny"),
+        serverLine(language, "server.peerApproval.alwaysAllow"),
+      ],
       requestId,
       tool: action,
       allowKey: peerAllowKey(action, target.id),
@@ -199,7 +202,7 @@ function peerCardThreads(bus: ApprovalBus): Set<string> {
 export function dismissStalePeerCards(bus: ApprovalBus): number {
   let dismissed = 0;
   const threads = peerCardThreads(bus);
-  for (const { threadId, messageId } of optionCardsForTools(Object.keys(ACTION_VERB))) {
+  for (const { threadId, messageId } of optionCardsForTools(["ask_bot", "delegate_bot", "post_to_room"])) {
     if (!threads.has(threadId)) continue;
     const card = bus.store.messagesFor(threadId).find((message) => message.id === messageId)?.card;
     if (!card?.requestId || card.answered || card.dismissed) continue;

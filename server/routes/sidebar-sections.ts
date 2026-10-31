@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { WireBot } from "../../shared/wire.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { TeamComputers } from "../team-computers.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface SidebarSectionRouteDeps {
@@ -11,6 +12,7 @@ export interface SidebarSectionRouteDeps {
   maxBots: number;
   assertTeamComputerChangeIdle(before: BotRecord, after: BotRecord): void;
   wireBot(bot: BotRecord): WireBot;
+  line?: (auth: RequestAuth, key: "server.departments.notFound" | "server.departments.invalidName" | "server.departments.alreadyExists" | "server.departments.stopBeforeRename" | "server.departments.moveMembersFirst" | "server.departments.stopBeforeDelete" | "server.departments.generalChiefConflict") => string;
 }
 
 export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): RouteHandler {
@@ -21,7 +23,7 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
     botIds: z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS).default([]),
   }).strict();
 
-  return async ({ req, res, url, path, method, json, readBody }) => {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     if (path === "/api/sidebar-sections" && method === "GET") {
       return json(res, 200, { sections: store.sections });
     }
@@ -35,8 +37,10 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
         if (!parsed.success) return json(res, 400, { error: "Department name must be 1 to 60 characters" });
         nextName = parsed.data.name;
       }
-      const error = nextName === null ? store.deleteSection(section) : store.renameSection(section, nextName, teamComputers);
-      if (error) return json(res, error === "No such department" ? 404 : 409, { error });
+      const line = deps.line ? (key: Parameters<NonNullable<typeof deps.line>>[1]) => deps.line!(auth, key) : undefined;
+      const missing = !store.sections.includes(section);
+      const error = nextName === null ? store.deleteSection(section, line) : store.renameSection(section, nextName, teamComputers, line);
+      if (error) return json(res, missing ? 404 : 409, { error });
       return json(res, 200, { sections: store.sections });
     }
     if (method === "PUT" && path === "/api/sidebar-sections") {

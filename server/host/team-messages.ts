@@ -19,6 +19,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { PASS } from "../routes/table.ts";
 import type { PresenceAnswer } from "./brief.ts";
 import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../store.ts";
+import { serverLine, type LineLanguage } from "../server-lines.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
@@ -59,6 +60,7 @@ export interface TeamMessagesDeps {
     representative?: Omit<RepresentativeDeps, "timeZone"> & Partial<Pick<RepresentativeDeps, "timeZone">>;
   };
   now?: () => number;
+  lineLanguage?: LineLanguage;
 }
 
 export interface MessagePersonContext {
@@ -92,7 +94,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
   const { representative, ...wiring } = deps.inbox;
   const inbox = createPersonInbox({
     notes: (botId) => loadMemory(botId)?.text ?? "", ...wiring, team, dataDir: deps.dataDir, store, starters: deps.starters, audienceOf: deps.audienceOf, personKeyOf: keyOf,
-    send: deps.notify, now, person: (key) => byKey(key),
+    send: deps.notify, now, person: (key) => byKey(key), lineLanguage: deps.lineLanguage,
     sees: (key, threadId) => { const one = byKey(key); return one ? deps.sees(one).thread(threadId) : false; },
     ...(representative ? { representative: createRepresentative({ now, timeZone: () => currentTimeZone(), ...representative }) } : {}),
   });
@@ -149,8 +151,9 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
 
   /** "Told Bob" in the conversation that passed it on, with what was passed under it. */
   function chip(threadId: string, at: Where | null, to: { name: string; email?: string }, message: string) {
+    const person = inbox.personOf(threadId) ?? askerOf(threadId)?.key;
     store.appendMessage(threadId, {
-      role: "bot", kind: "activity", tool: { name: `Told ${to.name}`, ok: true, output: message },
+      role: "bot", kind: "activity", tool: { name: serverLine(deps.lineLanguage?.(person), "server.inbox.toldPerson", { name: to.name }), ok: true, output: message },
       ...(to.email ? { relay: { kind: "told" as const, email: to.email, name: to.name } } : {}), ...(at?.group ? { from: from(at.bot) } : {}),
     });
   }
@@ -281,7 +284,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, ...(line.sendId ? { sendId: line.sendId } : {}),
       ...(line.sender ? { sender: line.sender } : {}), ...(line.reaction ? { reaction: line.reaction } : {}) });
     const back = answerFromInbox(threadId, null, item, text);
-    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Not passed to ${item.from}`, ok: false, output: back.text } });
+    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.lineLanguage?.(inbox.personOf(threadId) ?? askerOf(threadId)?.key), "server.inbox.notPassedTo", { name: item.from }), ok: false, output: back.text } });
     return { status: 202, message: posted };
   }
 

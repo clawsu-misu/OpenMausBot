@@ -4,6 +4,7 @@ import {
   addressesEveryone,
   applyHoldDirective,
   classifyHoldDirective,
+  heldMemberLine,
   isStopCommand,
   MAX_HELD_MESSAGES,
   rememberHeldMessage,
@@ -13,6 +14,11 @@ import {
 const members = ["scout", "pixel", "bee"];
 
 describe("room member holds", () => {
+  it("uses the caller's application language for the visible hold notice", () => {
+    expect(heldMemberLine("小鼠", (_key, { name }) => `${name} 已暂停（由你停止）；@提及它或说“继续”`))
+      .toBe("小鼠 已暂停（由你停止）；@提及它或说“继续”");
+  });
+
   it("holds a member when a stop word sits next to its mention", () => {
     expect(classifyHoldDirective("stop @Scout", ["scout"])).toEqual({ hold: ["scout"], holdAll: false, release: [], releaseAll: false });
     expect(classifyHoldDirective("@Scout please halt", ["scout"]).hold).toEqual(["scout"]);

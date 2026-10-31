@@ -1,5 +1,6 @@
 import { byLanguage } from "./language.ts";
 import { greetingName } from "../shared/greeting-name.ts";
+import { serverLine } from "./server-lines.ts";
 
 type Greeting = (name: string, person?: string) => string;
 
@@ -43,7 +44,12 @@ export function hasSetupChoices(language?: string): boolean {
 
 /** `person`: the name the person gave, greeted by greetingName; absent or blank, the greeting names no one. */
 export function initialGreeting(name: string, language?: string, person?: string): string {
-  return byLanguage(GREETINGS, language)(name, greetingName(person) || undefined);
+  const greeted = greetingName(person) || undefined;
+  const existingTranslation = byLanguage(GREETINGS, language);
+  if (existingTranslation !== GREETINGS.en) return existingTranslation(name, greeted);
+  return greeted
+    ? serverLine(language, "server.routines.initialGreetingNamed", { name, person: greeted })
+    : serverLine(language, "server.routines.initialGreeting", { name });
 }
 
 export function setupRequestLine(language?: string): string {

@@ -16,6 +16,7 @@ import type { BrowserService, BrowserTarget } from "../service.ts";
 import { FRAME_CAP_LIMITS, type Viewer, type ViewerOptions, type ViewerOutput } from "./core.ts";
 import { requestedSize } from "./viewport.ts";
 import { displayUrl } from "./live-v1.ts";
+import { serverLine } from "../../server-lines.ts";
 
 /** Close codes the stream client acts on. */
 export const STREAM_CLOSE = {
@@ -54,6 +55,7 @@ export interface StreamRequest {
   owner: string;
   /** The person watching, whose hold this view shares on any device; the owner when unset. */
   person?: string;
+  lineLanguage?: string;
   /** False for a passive view (picture in picture): it never takes control. */
   canOperate: boolean;
   params: URLSearchParams;
@@ -206,7 +208,7 @@ class StreamSession {
     try {
       await service.restart(this.request.target.session, this.viewer.options.person);
     } catch {
-      this.notice("The browser could not restart. Wait for active work to finish and try again.");
+      this.notice(serverLine(this.request.lineLanguage, "server.browser.restartFailed"));
     } finally {
       this.#restarting = false;
     }

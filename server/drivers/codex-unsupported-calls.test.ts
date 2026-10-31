@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { rolloutMark, unsupportedCallsIn, unsupportedCallsNotice, unsupportedCallsSince } from "./codex-unsupported-calls.ts";
+import "../server-line-packs.ts";
 
 const item = (payload: unknown) => `${JSON.stringify({ timestamp: "2026-10-26T02:17:00.000Z", type: "response_item", payload })}\n`;
 // What a provider that drops `namespace` makes codex write: the bare-named call, then codex's own refusal.
@@ -64,4 +65,5 @@ describe("unsupportedCallsSince", () => {
 it("names the refused tools and what to do", () => {
   expect(unsupportedCallsNotice(["retry_thread"])).toMatch(/^Codex could not run the tool retry_thread \("unsupported call"\)/);
   expect(unsupportedCallsNotice(["a", "b", "c", "d", "e", "f", "g", "h"])).toContain("a, b, c, d, e, f and 2 more");
+  expect(unsupportedCallsNotice(["retry_thread"], "zh-CN")).toContain("Codex 无法运行工具 retry_thread");
 });

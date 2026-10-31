@@ -1553,17 +1553,17 @@ function activeOrigin() {
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(buildApplicationMenu({
-      environments: environmentsState.environments, language: desktopPrefs?.language() || app.getLocale(),
-      activeId: environmentsState.activeId,
-      onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
-      onAddFromClipboard: () => void addServerFromClipboard(),
-      onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
-      onOrganizationSignIn: () => queueOrganizationEntry("openmausbot://organization"),
-      onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
-      onOpenSettings: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings"); },
-      openAtLogin: loginItem.available() ? { checked: loginItem.chosen(), onToggle: on => { loginItem.choose(on); refreshApplicationMenu(); } } : null,
-      ...cloudMenuOptions(),
-      home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
+    environments: environmentsState.environments, language: desktopPrefs?.language() || app.getLocale(),
+    activeId: environmentsState.activeId,
+    onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
+    onAddFromClipboard: () => void addServerFromClipboard(),
+    onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
+    onOrganizationSignIn: () => queueOrganizationEntry("openmausbot://organization"),
+    onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
+    onOpenSettings: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings"); },
+    openAtLogin: loginItem.available() ? { checked: loginItem.chosen(), onToggle: on => { loginItem.choose(on); refreshApplicationMenu(); } } : null,
+    ...cloudMenuOptions(),
+    home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
   }));
 }
 

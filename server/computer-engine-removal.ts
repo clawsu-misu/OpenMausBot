@@ -1,4 +1,5 @@
 import type { InstanceConfigMap } from "./contracts.ts";
+import { serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export const REMOVED_COMPUTER_DRIVER = "boxAgent";
 const REMOVED_COMPUTER_INSTANCE = "computer";
@@ -38,29 +39,34 @@ export function computerEngineMoveText(
   move: Pick<ComputerEngineMove, "scope" | "cloud" | "askNow"> & Partial<Pick<ComputerEngineMove, "noComputer">>,
   botName: string,
   engine: string,
+  language?: string,
 ): string {
-  const removed = "The Computer choice in the model list was removed.";
+  const keys = {
+    removed: "server.computerEngine.removed", conversation: "server.computerEngine.conversation", botOnly: "server.computerEngine.botOnly",
+    bot: "server.computerEngine.bot", cloudBot: "server.computerEngine.cloudBot", cloudConversation: "server.computerEngine.cloudConversation",
+    autoBot: "server.computerEngine.autoBot", autoConversation: "server.computerEngine.autoConversation", worksOn: "server.computerEngine.worksOn",
+    pinned: "server.computerEngine.pinned", askBotOnly: "server.computerEngine.askBotOnly", ask: "server.computerEngine.ask",
+  } as const satisfies Record<string, ServerLineKey>;
+  const line = (key: keyof typeof keys, values?: Record<string, string>) => serverLine(language, keys[key], values);
+  const removed = line("removed");
   const bot = move.scope !== "conversation";
-  const head = move.scope === "conversation" ? `This conversation now uses ${engine}.`
-    : move.scope === "bot-only" ? `${botName} now uses ${engine}; this conversation keeps its own model.`
-    : `${botName} now uses ${engine}.`;
-  const noComputer = ` ${engine} can't use a desktop, so`;
+  const head = move.scope === "conversation" ? line("conversation", { engine })
+    : move.scope === "bot-only" ? line("botOnly", { bot: botName, engine })
+    : line("bot", { bot: botName, engine });
+  const separator = language?.toLowerCase().startsWith("zh") ? "" : " ";
   const place = move.cloud
-    ? bot ? ` ${botName} still works on its cloud desktop.` : ` It still works on ${botName}'s cloud desktop.`
+    ? bot ? `${separator}${line("cloudBot", { bot: botName })}` : `${separator}${line("cloudConversation", { bot: botName })}`
     : move.noComputer === "auto"
-      ? `${noComputer} ${bot ? `${botName} no longer works on its` : `it no longer works on ${botName}'s`}` +
-        " cloud desktop. To use it again, choose a model that can use a desktop."
+      ? `${separator}${line(bot ? "autoBot" : "autoConversation", { bot: botName, engine })}`
     : move.noComputer === "works-on"
-      ? `${noComputer} ${botName} can't reply on ${engine} while its Works on is Cloud desktop.` +
-        " Choose a model that can use a desktop, or set Works on to Auto."
+      ? `${separator}${line("worksOn", { bot: botName, engine })}`
     : move.noComputer === "pin"
-      ? `${noComputer} ${botName} can't reply here while this conversation is pinned to its cloud desktop.` +
-        " Choose a model that can use a desktop, or clear this conversation's place in the composer."
+      ? `${separator}${line("pinned", { bot: botName, engine })}`
     : "";
   const ask = !move.askNow ? ""
-    : move.scope === "bot-only" ? ` ${botName}'s permissions are now Ask, but this conversation's stay as they were.`
-    : " Its permissions are now Ask.";
-  return `${head} ${removed}${place}${ask}`;
+    : move.scope === "bot-only" ? `${separator}${line("askBotOnly", { bot: botName })}`
+    : `${separator}${line("ask")}`;
+  return `${head}${separator}${removed}${place}${ask}`;
 }
 
 /** The move is saved already, so a failing line is logged and every other line is still written. */

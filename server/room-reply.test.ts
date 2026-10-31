@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WireMessage as Message } from "../shared/wire.ts";
-import { isPassText, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
+import { finishedWithoutSummaryLine, isPassText, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 
 const text = (id: string, turnId: string | undefined, extra: Partial<Message> = {}): Message => ({
   id,
@@ -14,6 +14,12 @@ const text = (id: string, turnId: string | undefined, extra: Partial<Message> = 
 }) as Message;
 
 describe("room replies", () => {
+  it("localizes the visible no-summary status through its formatter", () => {
+    expect(finishedWithoutSummaryLine("小鼠", true, (key, { bot }) => key.endsWith("Reasking")
+      ? `${bot}已结束但没有摘要，正在请求简短结果` : `${bot}已结束但没有摘要`))
+      .toBe("小鼠已结束但没有摘要，正在请求简短结果");
+  });
+
   it("is the turn's final message, not its working notes", () => {
     expect(roomTurnReply(["I'll check my own work history…", "Good, correct layer id…", "Done: the title is fixed."]))
       .toBe("Done: the title is fixed.");

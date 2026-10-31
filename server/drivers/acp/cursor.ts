@@ -4,6 +4,7 @@
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
+import { serverLine } from "../../server-lines.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import {
@@ -468,7 +469,7 @@ const support = (run: typeof execCli): AcpSupport => ({
     try {
       await request("session/set_model", { sessionId, modelId });
       if (match && !match.exact) {
-        notice(`Cursor offers ${modelId} rather than ${turn.model} in this session, so this conversation uses ${modelId}.`);
+        notice(serverLine(turn.lineLanguage, "server.cursor.offersModel", { model: modelId, requested: turn.model }));
       }
     } catch (e) {
       const err = e as Error & { code?: unknown };
@@ -478,10 +479,7 @@ const support = (run: typeof execCli): AcpSupport => ({
       if (err.code === -32602) {
         const current = sessionModels?.find((m) => m.modelId === currentModelId);
         const running = current?.name ?? currentModelId;
-        notice(
-          `Cursor did not accept ${turn.model} in this session, so it runs ${running ?? "its default model"}. ` +
-            "Choose another model for this bot to stop seeing this.",
-        );
+        notice(serverLine(turn.lineLanguage, "server.cursor.rejectsModel", { requested: turn.model, running: running ?? serverLine(turn.lineLanguage, "server.cursor.defaultModel") }));
         return;
       }
       throw new Error(

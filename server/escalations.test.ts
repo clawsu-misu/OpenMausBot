@@ -80,6 +80,11 @@ describe("escalationChip", () => {
     expect(peerApprovalGate("delegate_bot", "Hedge")).toBe("its approval card to delegate to @Hedge is waiting on the person");
     expect(escalationChip(escalation({ kind: "peer-approval", gate: peerApprovalGate("ask_bot", "Hedge") }))).toContain("Escalation: Mira's work");
   });
+
+  it("formats the visible chip in the caller's language", () => {
+    const chip = escalationChip(escalation({ room: "支持" }), (_key, { bot, room, gate }) => `升级提醒：${bot}在房间“${room}”中等待处理：${gate}。`);
+    expect(chip).toBe("升级提醒：Mira在房间“支持”中等待处理：it raised this flag itself。");
+  });
 });
 
 describe("EscalationLedger", () => {

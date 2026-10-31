@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, type Message, type useStore } from "@/state/store";
-import { t } from "@/lib/i18n";
+import { activeLocale, documentLanguage, setLocale, t } from "@/lib/i18n";
 import { WIDGET_SAMPLES } from "../../../shared/widget-samples";
 import { dayList, parseWidgetInput, type WidgetNode, type WidgetRoot } from "../../../shared/widget";
 import { WidgetMessage } from "./WidgetMessage";
@@ -35,6 +35,7 @@ const key = (element: Element, name: string) => act(() => { element.dispatchEven
 const sent = () => JSON.parse(String(fetchMock.mock.calls.at(-1)![1]!.body)).widgetAction.values;
 
 beforeEach(() => {
+  setLocale("en");
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } }));
   vi.stubGlobal("fetch", fetchMock);
@@ -48,6 +49,7 @@ afterEach(() => {
   host.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  setLocale("en");
 });
 
 describe("a field's own label", () => {
@@ -102,6 +104,22 @@ describe("TimePicker", () => {
     expect(widgetTime("8:05")).toBe("08:05");
     expect(widgetTime("24:00")).toBe("");
     expect(widgetTimeLabel("13:30")).toMatch(/1:30|13:30/);
+  });
+
+  it("refreshes cached weekday and time formats when the app language changes", () => {
+    setLocale("en");
+    expect(widgetDayNames().long[0]).toBe("Monday");
+    const english = widgetTimeLabel("13:30");
+    for (const languageCode of ["zh", "de"]) {
+      setLocale(languageCode);
+      const language = documentLanguage(activeLocale());
+      const monday = new Date(2024, 0, 1);
+      const time = new Date(2000, 0, 1, 13, 30);
+      expect(widgetDayNames().long[0]).toBe(new Intl.DateTimeFormat(language, { weekday: "long" }).format(monday));
+      expect(widgetTimeLabel("13:30")).toBe(new Intl.DateTimeFormat(language, { hour: "numeric", minute: "2-digit" }).format(time));
+    }
+    setLocale("de");
+    expect(english).not.toBe(widgetTimeLabel("13:30"));
   });
 
   it("opens on the time it holds, walks the list from the keyboard, and sends HH:MM", async () => {

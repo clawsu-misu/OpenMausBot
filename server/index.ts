@@ -198,6 +198,7 @@ import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { cliProbeEnvironment, testCliBinary } from "./cli-probe.ts";
 import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
+import { serverLine } from "./server-lines.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -2190,10 +2191,10 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
     const waitedMs = waitedSince === undefined ? 0 : Date.now() - waitedSince;
     if (outcome === "acquired") turnResources.noteWait(resource, waitedMs);
     const text = outcome === "acquired"
-      ? computerFreeAfterText(holder, waitedMs)
+      ? computerFreeAfterText(holder, waitedMs, personLanguages.forLine(threadPersonKey(owner.threadId)))
       : outcome === "parked"
-        ? computerParkedText(holder, COMPUTER_WAIT_MAX_MS)
-        : computerStoppedWaitingText(holder, waitedMs);
+        ? computerParkedText(holder, COMPUTER_WAIT_MAX_MS, personLanguages.forLine(threadPersonKey(owner.threadId)))
+        : computerStoppedWaitingText(holder, waitedMs, personLanguages.forLine(threadPersonKey(owner.threadId)));
     store.appendMessage(owner.threadId, {
       role: "bot", kind: "activity",
       tool: { name: text, ok: true },
@@ -2227,7 +2228,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
           : undefined;
         waitingMessage = store.appendMessage(owner.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: computerWaitingText(holder, { position, estimateMs }) },
+          tool: { name: computerWaitingText(holder, { position, estimateMs }, personLanguages.forLine(threadPersonKey(owner.threadId))) },
           ...(holderThreadRef ? { threadRef: holderThreadRef } : {}),
         });
         waitedSince = Date.now();
@@ -2243,7 +2244,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
         endWait("parked");
         owner.computerParkedOn = resource;
         computerParks.set(owner.generation, resource);
-        throw new ComputerWaitParked(computerParkedText(holder, COMPUTER_WAIT_MAX_MS), resource, owner.generation);
+        throw new ComputerWaitParked(computerParkedText(holder, COMPUTER_WAIT_MAX_MS, personLanguages.forLine(threadPersonKey(owner.threadId))), resource, owner.generation);
       }
       await new Promise<void>(resolve => setTimeout(resolve, 100));
     }
@@ -2621,7 +2622,7 @@ async function moveOffComputerEngine(): Promise<void> {
   });
   writeComputerEngineMoveLines(moves, (move) => {
     const bot = store.bot(move.botId);
-    if (bot) store.appendMessage(move.threadId, { role: "bot", kind: "activity", tool: { name: computerEngineMoveText(move, bot.name, engine), ok: true } });
+    if (bot) store.appendMessage(move.threadId, { role: "bot", kind: "activity", tool: { name: computerEngineMoveText(move, bot.name, engine, personLanguages.forLine(threadPersonKey(move.threadId))), ok: true } });
   });
 }
 let computerEngineMoveRunning: Promise<void> | null = null;
@@ -2779,7 +2780,7 @@ function healThreadModel(botId: string, threadId: string): void {
   if (!bot || !own || bot.approvalGrant || threadBusy(botId, threadId)) return;
   if (!store.followBotModel(botId, [threadId], (from, to) => hostedModels?.resetTask(from, to) ?? {}).length) return;
   store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
-    name: `notice: This thread's model (${modelName(own)}) isn't available, so it now uses ${bot.name}'s model (${modelName(bot.modelSelection)}).`,
+    name: `notice: ${serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.modelUnavailable", { threadModel: modelName(own), bot: bot.name, botModel: modelName(bot.modelSelection) })}`,
     ok: true,
   } });
 }
@@ -2870,12 +2871,11 @@ const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudT
   memoryChangedBySomeoneElse: (botId) => lendingMemory?.reconcile(botId, foreignTurnRunning(botId), { cached: true }).changedBySomeoneElse === true });
 const actingPeople = createActingPeople({ store, direct: (threadId) => directRequestOwners.get(threadId), roomRun, handed: new HandedPeople(join(DATA_DIR, HANDED_PEOPLE_FILE)) });
 const { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning } = createPersonStop({
-  store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended,
+  store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended, lineLanguage: (threadId) => threadId ? personLanguages.forLine(threadPersonKey(threadId)) : appLanguage(),
   stopGoal: (threadId) => oneOnOneGoals.stop(threadId), markStopped: (threadId) => personStops.stop(threadId, liveTurns.running(threadId), directTurnDispatchClaims.has(threadId)),
-}); const teamMessages = createTeamMessages({ team: CLOUD_TEAM, dataDir: DATA_DIR, store, people: teamOwners.people, personName: teamHost.personName, audienceOf: teamHost.audienceOf, starters: threadStarters, notify, sees: (person) => visibleTo(person.role === "member" ? { kind: "member", email: person.email } : { kind: "all", email: person.email }), inbox: { askedPerson: teamOwners.routing.askedPerson, changed: (threadId) => { const bot = store.botByThread(threadId); if (bot) broadcast({ kind: "bot", bot: wireBot(bot) }); }, ensureOwnBot: (email) => { ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM?.name ?? null }); }, handedFrom: (threadId) => { const from = delegatorOf(threadId); return from && from.threadId !== threadId ? from.threadId : null; }, continueTurn: relayedTurn({ store, startTurn, state: (botId, threadId) => ({ atCapacity: botAtThreadCapacity(botId, threadId), threadBusy: threadBusy(botId, threadId), groupTurn: roomTurnHolds(activeGroupTurnForBot(botId), threadId, false), parksBehindCoordination: parksBehindCoordination(botId, threadId) }) }), representative: { generate: async (botId, prompt) => (await sideJobs.text("representative", botId)?.generateText(prompt, { timeoutMs: 60_000 })) ?? null, busy: createPersonCalendar({ access: (person) => teamConnections.personApps().includes("googlecalendar") ? teamConnections.people.appsAccess(person) : null, connected: async (access) => (await composio.connectedServices(cfg, access)).googlecalendar?.connected === true, relay: (payload, session, signal, access) => composio.relayMcp(cfg, payload as never, session, undefined, signal, access) }).busy } } });
+}); const teamMessages = createTeamMessages({ team: CLOUD_TEAM, dataDir: DATA_DIR, store, people: teamOwners.people, personName: teamHost.personName, audienceOf: teamHost.audienceOf, starters: threadStarters, notify, lineLanguage: personLanguages.forLine, sees: (person) => visibleTo(person.role === "member" ? { kind: "member", email: person.email } : { kind: "all", email: person.email }), inbox: { askedPerson: teamOwners.routing.askedPerson, changed: (threadId) => { const bot = store.botByThread(threadId); if (bot) broadcast({ kind: "bot", bot: wireBot(bot) }); }, ensureOwnBot: (email) => { ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM?.name ?? null, language: personLanguages.forLine(email) }); }, handedFrom: (threadId) => { const from = delegatorOf(threadId); return from && from.threadId !== threadId ? from.threadId : null; }, continueTurn: relayedTurn({ store, startTurn, state: (botId, threadId) => ({ atCapacity: botAtThreadCapacity(botId, threadId), threadBusy: threadBusy(botId, threadId), groupTurn: roomTurnHolds(activeGroupTurnForBot(botId), threadId, false), parksBehindCoordination: parksBehindCoordination(botId, threadId) }) }), representative: { generate: async (botId, prompt) => (await sideJobs.text("representative", botId)?.generateText(prompt, { timeoutMs: 60_000 })) ?? null, busy: createPersonCalendar({ access: (person) => teamConnections.personApps().includes("googlecalendar") ? teamConnections.people.appsAccess(person) : null, connected: async (access) => (await composio.connectedServices(cfg, access)).googlecalendar?.connected === true, relay: (payload, session, signal, access) => composio.relayMcp(cfg, payload as never, session, undefined, signal, access) }).busy } } });
 const devsReports = createDevsReports({ dataDir: DATA_DIR, store, installId: ENVIRONMENT_ID, appVersion: serverVersion(), runsOn: CLOUD_TEAM ? "Team Cloud" : CLOUD_HOME ? "My Cloud" : DESKTOP_MANAGED ? "desktop app" : HOSTED_WORKSPACE ? "hosted server" : "self-hosted server", recentLog: captureRecentLog(), send: devsReportSender(bugReportEndpoint(process.env, CLOUD_HOME?.adminOrigin)), working: (threadId) => { const group = store.groupByThread(threadId), bot = group ? null : store.botByThread(threadId); return group ? Boolean(group.busyBotId) || groupThreadIsWorking(group.id, threadId) : Boolean(bot && threadBusy(bot.id, threadId)); }, automated: (threadId) => Boolean(routines?.isActiveThread(threadId)), engine: (instanceId) => (registry.get(instanceId) ? { name: engineName(instanceId), snapshot: registry.lastSnapshot(instanceId) } : null), appsReady: () => composio.configured(cfg), sessions: () => sessions.list(), ownerKey: CLOUD_OWNER_KEY, team: Boolean(CLOUD_TEAM), profileEmail: () => cfg.profile?.email, language: appLanguage, lineLanguage: personLanguages.forLine });
-const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, store, context: selectionContext, threadBusy, saveDefault: saveNewBotModel,
-  defaults: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], engineName: id => registry.get(id)?.displayName ?? id,
+const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, store, context: selectionContext, threadBusy, saveDefault: saveNewBotModel, defaults: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], engineName: id => registry.get(id)?.displayName ?? id, lineLanguage: (threadId) => personLanguages.forLine(threadPersonKey(threadId)),
   log: line => console.warn(line) });
 const routineHolds = CLOUD_HOME ? createRoutineHoldsHost({ dataDir: DATA_DIR, store, mcpServers: () => Object.keys(cfg.mcpServers ?? {}).length, log: (line) => console.warn(line),
   appsConnected: async () => composio.configured(cfg) ? Object.values(await composio.connectedServices(cfg)).some((service) => service.connected) : false }) : null;
@@ -2917,7 +2917,7 @@ for (const pending of startupCatalogs) {
     broadcast({ kind: "config", ...configStatus() });
   }, () => {});
 }
-const firstHourFresh = Boolean(CLOUD_PERSONAL) && store.needsSeed(); testedAi.seed({ defaultBot: !CLOUD_TEAM, ...(firstHourFresh ? { intro: (bot) => greetingMessage(bot, { name: cfg.profile?.name }, cfg.language) } : {}) }); moveFreeze.hold(() => { if (!CLOUD_TEAM) ensureDefaultBot(store, { dataDir: DATA_DIR }); }, () => {}); if (CLOUD_TEAM) readTeamRolesWith((email) => sessions.list().filter((session) => session.email?.toLowerCase() === email && session.teamRole).sort((a, b) => b.createdAt - a.createdAt)[0]?.teamRole ?? null);
+const firstHourFresh = Boolean(CLOUD_PERSONAL) && store.needsSeed(); testedAi.seed({ defaultBot: !CLOUD_TEAM, ...(firstHourFresh ? { intro: (bot) => greetingMessage(bot, { name: cfg.profile?.name }, cfg.language) } : {}) }); moveFreeze.hold(() => { if (!CLOUD_TEAM) ensureDefaultBot(store, { dataDir: DATA_DIR, language: cfg.language }); }, () => {}); if (CLOUD_TEAM) readTeamRolesWith((email) => sessions.list().filter((session) => session.email?.toLowerCase() === email && session.teamRole).sort((a, b) => b.createdAt - a.createdAt)[0]?.teamRole ?? null);
 hostedModels?.reconcile(store);
 if (skillsLibraryEnabled(cfg)) {
   try {
@@ -3161,8 +3161,7 @@ function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
   return Boolean(bot.approvePeerComms && !fullAccessForSource(bot.id, threadId));
 }
 
-const delegatedLevel = createDelegatedLevel({ store, node: id => coordinator.node(id), sourceLevel: sourceApprovalMode, turnLevel: approvalModeForTurn,
-  driverKind: bot => registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, guestDriven: cloudGuestDriven });
+const delegatedLevel = createDelegatedLevel({ store, node: id => coordinator.node(id), sourceLevel: sourceApprovalMode, turnLevel: approvalModeForTurn, driverKind: bot => registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, guestDriven: cloudGuestDriven, line: (threadId, key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params) });
 const liveApprovalMode = createLiveApprovalMode({ store, turnLevel: approvalModeForTurn });
 
 function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: GroupTurnOrchestration): ApprovalMode {
@@ -3620,7 +3619,7 @@ function activeGroupSpeaker(groupId: string): { botId: string; name: string; col
 }
 
 const goalTurns = createGoalTurns({ retireProviderTurn });
-const goalCards = createGoalCards({ store, routines: () => routines, notify, routineSourceOwner, routineSourceThread });
+const goalCards = createGoalCards({ store, routines: () => routines, notify, routineSourceOwner, routineSourceThread, language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)) });
 const oneOnOneGoals = createOneOnOneGoals({
   store, cards: goalCards, turns: goalTurns, canStart: canAdmitDirectTurn, startTurn, isUnattended,
 });
@@ -3755,7 +3754,7 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
     if (!existing.dm) {
       throw Object.assign(new Error("set the turn limit on that conversation"), { status: 400 });
     }
-    const parsed = parseConversationTurnTimeout(body.turnTimeoutMinutes);
+    const parsed = parseConversationTurnTimeout(body.turnTimeoutMinutes, () => serverLine(personLanguages.forLine(threadPersonKey(existing.threadId)), "server.rooms.turnLimitInvalid"));
     if (!parsed.ok) throw Object.assign(new Error(parsed.error), { status: 400 });
     patch.turnTimeoutMinutes = parsed.minutes;
   }
@@ -3863,7 +3862,7 @@ function noteQueuedBehindPerson(node: HandoffView): void {
   store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
     // A notice, not a step: nothing settles it, so it must never read as running.
-    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title), ok: true },
+    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title, personLanguages.forLine(threadPersonKey(parent.threadId))), ok: true },
     threadRef: { botId: bot.id, threadId: card.threadId, title: card.title },
   });
 }
@@ -3907,7 +3906,7 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
     return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
   }
   if (composed.turn === "rerun") {
-    store.appendMessage(node.threadId, { role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color }, tool: { name: "Resuming after a restart", ok: true } });
+    store.appendMessage(node.threadId, { role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color }, tool: { name: serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), "server.index.resumingRestart"), ok: true } });
   }
   parkedSeats.delete(node.id);
   return runRoomNode(node, group, bot, signal, undefined, (operation, result, coordination) =>
@@ -3917,7 +3916,7 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
 }
 
 function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> {
-  if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
+  if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), "server.index.resumingRestart"), ok: true } });
   parkedSeats.delete(node.id);
   const owner = directRequestOwners.get(node.threadId);
   const ownRequest = owner && !owner.stopped && owner.generations.has(node.id) ? owner : undefined;
@@ -3959,6 +3958,7 @@ function followupAtBoot(threadId: string): "dispatched" | "pending" | undefined 
 const followupEndedRoots = new Map<string, string | undefined>();
 
 const askCards = createAskCards({ store, node: (id) => coordinator.node(id), delegatorOf, notify, answerCard: respondToCard,
+  language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)),
   answeredIn: (threadId, requestId) => automationReports.answeredIn(teamMessages.inbox.answeredIn(threadId, requestId), requestId), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
   copiedInto: (inboxThreadId, botId, threadId) => Boolean(CLOUD_TEAM) && teamMessages.inbox.isHomeOf(inboxThreadId, teamOwners.routing.askedPerson(botId, threadId)) });
 const coordinator: Coordinator = createCoordinator({
@@ -4018,7 +4018,7 @@ const coordinator: Coordinator = createCoordinator({
       if (child.mode === "notify") {
         if (child.status !== "completed" && store.taskByThread(child.botId, child.threadId)) {
           store.appendMessage(child.threadId, { role: "bot", kind: "activity",
-            tool: { name: `Send failed — ${child.result.split("\n", 1)[0]!.slice(0, 180)}`, ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
+          tool: { name: serverLine(personLanguages.forLine(threadPersonKey(child.threadId)), "server.index.sendFailed", { error: child.result.split("\n", 1)[0]!.slice(0, 180) }), ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
         }
         return;
       }
@@ -4033,7 +4033,7 @@ const coordinator: Coordinator = createCoordinator({
         roomRequest: { id: child.id, phase: "result" },
         from: bot ? { botId: bot.id, name: bot.name, color: bot.color } : undefined,
         tool: {
-          name: problem ? `Result withheld: ${problem}`
+          name: problem ? serverLine(personLanguages.forLine(threadPersonKey(parent.threadId)), "server.index.resultWithheld", { problem })
             : child.status === "completed" ? `${bot?.name ?? "Teammate"} replied${child.groupId ? ` · ${store.group(child.groupId)?.name ?? "Room"}` : ""}`
             : `${bot?.name ?? "Teammate"} — ${child.status}: ${child.result.split("\n", 1)[0]!.slice(0, 180)}`,
           ok: child.status === "completed" && !problem,
@@ -4082,23 +4082,23 @@ const coordinator: Coordinator = createCoordinator({
       if (resumed && !group) {
         const asking = coordinator.children(node.id).filter(child => child.question !== undefined && !child.cards?.length);
         const settledFrom = [...new Set((asking.length ? asking : coordinator.children(node.id)).map(child => store.bot(child.botId)?.name ?? "Teammate"))];
-        const who = settledFrom.length ? settledFrom.join(", ") : "delegated work";
+        const who = settledFrom.length ? settledFrom.join(", ") : serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), "server.index.delegatedWork");
         store.appendMessage(node.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: `${asking.length ? `Resumed with a question from ${who}` : `Resumed with ${who} results`}${node.restart ? " after a restart" : ""}, reviewing`, ok: true },
+          tool: { name: serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), asking.length ? "server.index.resumedQuestion" : "server.index.resumedResults", { who, restart: node.restart ? serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), "server.index.afterRestart") : "" }), ok: true },
         });
         const quiet = turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet;
         const routineRoot = !node.parentId && activeRoutineRunForThread(node.threadId) !== null;
         if (node.restart !== "rerun" && !quiet && !routineRoot && asking.length === 0) {
-          notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }));
+          notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }, personLanguages.forLine(threadPersonKey(node.threadId))));
         }
       if (!node.parentId && !quiet) reviewAnswerThreads.add(node.threadId);
       } else if (node.restart === "rerun" && !group) {
-        store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
+        store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), "server.index.resumingRestart"), ok: true } });
       }
       if (node.restart === "rerun" && !group && parent && !parent.groupId) store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} was cut off by a restart; resuming`, ok: true },
+        tool: { name: serverLine(personLanguages.forLine(threadPersonKey(parent.threadId)), "server.index.cutOffRestart", { bot: bot.name }), ok: true },
         threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work" } });
       if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
       if (!group) return new Promise<HostTurnResult>(resolve => {
@@ -4157,7 +4157,7 @@ const coordinator: Coordinator = createCoordinator({
       return outwardActions(turnRows(node));
     },
     shareAnswer: createShareAnswer({ askedFrom: (node) => (node.parentId ? coordinator.node(node.parentId)?.threadId : undefined), audienceOf: teamHost.audienceOf, pinned: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd, botFolder: (botId) => store.bot(botId)?.cwd, privateFolders: TASK_WORKSPACES_DIR }),
-    joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "notice: Another teammate asked the same a moment ago, so this gets that answer instead of a second one.", ok: true } }); },
+    joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(personLanguages.forLine(threadPersonKey(node.threadId)), "server.teammate.duplicateAnswer")}`, ok: true } }); },
   },
 });
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
@@ -4353,7 +4353,7 @@ function noteHeldSkip(groupId: string, threadId: string, bot: BotRecord, message
     role: "bot",
     kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
-    tool: { name: heldMemberLine(bot.name), ok: false },
+    tool: { name: heldMemberLine(bot.name, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params)), ok: false },
   });
 }
 
@@ -4433,8 +4433,8 @@ async function waitForChatRoomMember(
   bot: BotRecord,
 ): Promise<"run" | "skip" | "stop"> {
   const waitTool = {
-    name: `${bot.name} is finishing another conversation — will reply here when free`,
-    spoken: `${bot.name} is finishing another conversation`,
+    name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.finishingConversation", { bot: bot.name }),
+    spoken: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.finishingConversationSpoken", { bot: bot.name }),
   };
   let waitChip: Message | undefined;
   const availability = await waitForGroupMemberBot(bot, operation, () => {
@@ -4457,13 +4457,12 @@ async function waitForChatRoomMember(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} is no longer available — skipped this round`, ok: false },
+        tool: { name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.unavailableSkip", { bot: bot.name }), ok: false },
       });
       return "skip";
     case "timed_out": {
       const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
-      const name =
-        `${bot.name} stayed busy in another conversation for ${minutes} minute${minutes === 1 ? "" : "s"} — skipped this round`;
+      const name = serverLine(personLanguages.forLine(threadPersonKey(threadId)), minutes === 1 ? "server.index.busyTimeoutOne" : "server.index.busyTimeout", { bot: bot.name, minutes });
       if (waitChip) store.patchMessage(threadId, waitChip.id, { tool: { name, ok: false } });
       else {
         store.appendMessage(threadId, {
@@ -4915,7 +4914,7 @@ async function answerRequest(
       commandAllowlist.add(remembered.botId, remembered.candidate);
     } catch {
       store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
-        name: "Command allowed once, but its allowlist rule could not be saved. Try again from the permissions menu.", ok: false,
+        name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.allowOnceSaveFailed"), ok: false,
       } });
     }
   }
@@ -4952,7 +4951,7 @@ async function answerRequest(
     if (!persistentQuestion && !existing?.card?.answered) store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: "Couldn't deliver that answer — the request is no longer open, so the action was not run", ok: false },
+      tool: { name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.answerNoLongerOpen"), ok: false },
     });
   }
   return outcome;
@@ -5541,14 +5540,14 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   if (name === "PreCompact" || (name === "SessionStart" && payload.source === "compact")) roomSessions.distrust(threadId, capability.botId);
   if (name === "PreCompact") {
     const trigger = payload.trigger === "manual" ? "manual" : "auto";
-    chip(`context compaction started (${trigger})`);
+    chip(serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.compactionStarted", { trigger }));
     return { ok: true };
   }
   if (name === "SessionStart") {
     if (payload.source !== "compact") return { ok: true, ignored: `SessionStart ${String(payload.source ?? "")}` };
     const bot = store.bot(capability.botId);
     const digests = store.activePath(threadId).filter((m) => m.kind === "digest" && m.digest).slice(-DIGESTS_AFTER_COMPACTION);
-    chip(`context compacted — re-sent the last ${digests.length} digest${digests.length === 1 ? "" : "s"}`);
+    chip(serverLine(personLanguages.forLine(threadPersonKey(threadId)), digests.length === 1 ? "server.index.compactedOne" : "server.index.compactedMany", { count: digests.length }));
     if (!digests.length) return { ok: true };
     const context = digests.map((m) => digestPromptLine(m.digest!, m.from?.name ?? store.bot(m.digest!.botId)?.name ?? bot?.name ?? "the bot")).join("\n");
     return { ok: true, context };
@@ -5675,9 +5674,9 @@ function isUnattended(botId?: string | null, threadId?: string): boolean {
 
 const reviewAnswerThreads = new Set<string>(); const firstHourHooks = createFirstHourHooks({ dataDir: DATA_DIR, personal: Boolean(CLOUD_PERSONAL) });
 let routines: RoutineManager | null = null;
-const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId),
-  notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }), { routine: true }) });
-const proactive = createProactive({ store, cfg, composio, registry, dataDir: DATA_DIR, ideas: (botId) => memoryUpkeep.ideas(botId), ...firstHourHooks.proactive, team: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), frozen: moveFreeze.frozen, routines: () => routines, mainThread: botMainThread, threadBusy, notify, helpers: { decider, extractor }, cloud: Boolean(CLOUD_HOME || HOSTED_WORKSPACE || CLOUD_TEAM),
+const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, lineLanguage: (bot, threadId) => personLanguages.forLine(threadPersonKey(threadId ?? bot.threadId)), brief: (run, turnId) => proactive.runSettled(run, turnId),
+  notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }, personLanguages.forLine(threadPersonKey(threadId))), { routine: true }) });
+const proactive = createProactive({ store, cfg, composio, registry, dataDir: DATA_DIR, ideas: (botId) => memoryUpkeep.ideas(botId), ...firstHourHooks.proactive, team: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), frozen: moveFreeze.frozen, routines: () => routines, mainThread: botMainThread, threadBusy, notify, lineLanguage: (threadId) => personLanguages.forLine(threadPersonKey(threadId)), helpers: { decider, extractor }, cloud: Boolean(CLOUD_HOME || HOSTED_WORKSPACE || CLOUD_TEAM),
   engineName: (instanceId) => engineName(instanceId), hostTimeZone: () => (CLOUD_HOME ? undefined : hostTimeZone()), decide: (row) => appendDecision(DATA_DIR, row), stale: shouldIgnoreProviderEvent, release: (threadId) => watchdog.setWaitingOnHuman(threadId, false),
   owned: (routine) => { (cloudRoutineAuthors ?? phones.routineAuthors)?.record(routine.id, routine); if (CLOUD_OWNER_KEY) cloudRoutineAuthors?.wrote(routine.id, CLOUD_OWNER_KEY); }, needsYou: () => needsYouNow({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }, { admin: true, thread: () => true, routine: () => true }) });
 let calendarCalls: CalendarCallManager | null = null;
@@ -6216,7 +6215,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
     void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).catch(error => {
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity",
-        tool: { name: `Could not continue on ${surfaceLabel(surface)}: ${error instanceof Error ? error.message : String(error)}`, ok: false } });
+        tool: { name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.continueFailed", { place: surfaceLabel(surface), error: error instanceof Error ? error.message : String(error) }), ok: false } });
     });
   });
   return true;
@@ -6525,7 +6524,7 @@ bus.subscribe((event: RuntimeEvent) => {
             role: "bot",
             kind: "activity",
             tool: {
-              name: `generated image could not be attached — ${error instanceof Error ? error.message : "invalid image"}`.slice(0, 160),
+              name: serverLine(personLanguages.forLine(threadPersonKey(event.threadId)), "server.index.imageAttachFailed", { error: (error instanceof Error ? error.message : serverLine(personLanguages.forLine(threadPersonKey(event.threadId)), "server.index.invalidImage")).slice(0, 120) }),
               ok: false,
             },
           });
@@ -6612,7 +6611,7 @@ bus.subscribe((event: RuntimeEvent) => {
           role: "bot",
           kind: "activity",
           tool: {
-            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}, so this bot asks before each action. Choose a model it supports, or Full access, to stop the prompts.`,
+            name: serverLine(personLanguages.forLine(threadPersonKey(event.threadId)), "server.index.autoReviewerUnavailable", { provider: providerLabel(event.provider), model: model ? ` for ${model}` : "" }),
             ok: true,
           },
         });
@@ -6638,7 +6637,7 @@ bus.subscribe((event: RuntimeEvent) => {
           if (!isCurrent()) return;
           if (outcome !== "allowed-once") {
             watchdog.setWaitingOnHuman(event.threadId, false);
-            if (outcome !== "unavailable") pushMessage({ role: "bot", kind: "activity", tool: undeliveredApprovalTool(outcome, verdict.source) });
+            if (outcome !== "unavailable") pushMessage({ role: "bot", kind: "activity", tool: undeliveredApprovalTool(outcome, verdict.source, personLanguages.forLine(threadPersonKey(event.threadId))) });
             return;
           }
           pushMessage({
@@ -6672,10 +6671,10 @@ bus.subscribe((event: RuntimeEvent) => {
         card: {
           title:
             permission && event.approvalScope === "local-computer"
-              ? "Local computer approval"
+              ? serverLine(personLanguages.forLine(threadPersonKey(event.threadId)), "server.index.localApproval")
               : permission
-                ? "Approval needed"
-                : "Your bot has a question",
+                ? serverLine(personLanguages.forLine(threadPersonKey(event.threadId)), "server.index.approvalNeeded")
+                : serverLine(personLanguages.forLine(threadPersonKey(event.threadId)), "server.index.botQuestion"),
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
@@ -6719,6 +6718,8 @@ bus.subscribe((event: RuntimeEvent) => {
             notificationBot,
             (routineRun && routineSourceThread(routineRun)) || event.threadId,
             routineRun?.attention ? `${routineRun.routineName}: ${routineRun.attention}` : event.summary,
+            undefined,
+            personLanguages.forLine(threadPersonKey((routineRun && routineSourceThread(routineRun)) || event.threadId)),
           ), routineRun ? { routine: true } : undefined);
         }
       }
@@ -6952,7 +6953,7 @@ bus.subscribe((event: RuntimeEvent) => {
         if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
         if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, completedTurnId);
         else if ((!routineRun || routineRun.status === "completed") && !internal && !computerSelectionTurns.get(event.threadId)?.selected) {
-          notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }), routineRun ? { routine: true } : undefined);
+          notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }, personLanguages.forLine(threadPersonKey(event.threadId))), routineRun ? { routine: true } : undefined);
         }
         if (screenPollers.has(event.threadId)) {
           // Keep the thread busy until the final END-state capture: an accepted follow-up must not take the desktop first.
@@ -7010,7 +7011,7 @@ bus.subscribe((event: RuntimeEvent) => {
           });
         }
         liveTurnByThread.delete(event.threadId);
-        if (event.ok && !stopped && speakingBot) notify(buildMentionNotification(store, speakingBot, group, { threadId: event.threadId, turnId: completedTurnId, reply, profileName: CLOUD_TEAM ? undefined : cfg.profile?.name }));
+        if (event.ok && !stopped && speakingBot) notify(buildMentionNotification(store, speakingBot, group, { threadId: event.threadId, turnId: completedTurnId, reply, profileName: CLOUD_TEAM ? undefined : cfg.profile?.name }, personLanguages.forLine(threadPersonKey(event.threadId))));
       }
       if (speaker) {
         releaseTurnResources(turnResourceOwners.get(event.threadId));
@@ -7082,7 +7083,7 @@ function runtimeWorkPending(threadId: string): boolean {
 }
 
 const { reportIncident, reportEscalation, incidentRefused, retryThread } = createChiefNotices({
-  store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId),
+  store, notify, threadBusy, botAtThreadCapacity, startTurn, lineLanguage: (threadId) => threadId ? personLanguages.forLine(threadPersonKey(threadId)) : appLanguage(), quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId),
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
@@ -7256,7 +7257,7 @@ const repeats = createLoopGuard({
 });
 bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) repeats.onEvent(event); });
 // A first reply that never comes gets one notice with a way out (server/first-reply-rescue.ts), on listeners of their own.
-const firstReplyRescue = createFirstReplyRescue({ store, botForThread, speaker: (threadId) => groupSpeakers.get(threadId), runningEngine: (threadId) => runningTurnEngines.get(threadId)?.instanceId,
+const firstReplyRescue = createFirstReplyRescue({ store, botForThread, speaker: (threadId) => groupSpeakers.get(threadId), runningEngine: (threadId) => runningTurnEngines.get(threadId)?.instanceId, lineLanguage: (threadId) => threadId ? personLanguages.forLine(threadPersonKey(threadId)) : appLanguage(),
   engineName: (instanceId) => engineName(instanceId), quiet: (threadId) => isInternalTurn(threadId) || activeRoutineRunForThread(threadId) !== null,
   live: (threadId, turnId) => liveTurns.running(threadId) === turnId, requests: directRequestOwners });
 bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) liveTurns.onEvent(event); }); bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) firstReplyRescue.onEvent(event); });
@@ -7838,7 +7839,7 @@ async function startTurn(
     && !opts?.computerSelectionContinuation && !opts?.editedMessageId && !commsDepth && !opts?.peerAsk && !userMessage.peerAsk;
   if (personLine && coordinator.answer(threadId, text)) {
     askCards.answeredInWords(threadId, text);
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Answer passed to the waiting work", ok: true } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.answerPassed"), ok: true } });
     opts?.onTurnSettled?.();
     queueMicrotask(drainQueuedSends);
     return userMessage;
@@ -8196,7 +8197,7 @@ async function startTurn(
           tool: failedTurnTool(message, placeFailure ? { place: placeFailure.row } : {}),
         });
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
-          notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
+          notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }, personLanguages.forLine(threadPersonKey(threadId))));
           reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
           // Claude settles the interrupt below as exit_before_result; the completion fold must not report it a second time.
           resourceOwner.lazyClaimFailureReported = true;
@@ -8572,6 +8573,7 @@ async function startTurn(
       const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
         threadId,
         botId: bot.id,
+        lineLanguage: personLanguages.forLine(threadPersonKey(threadId)),
         startupRecovery,
         text: withTurnClock(clock, withRecalled(recalled, dispatchContext.turnText + shareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
         ...(recalled ? { recalled } : {}),
@@ -8747,7 +8749,7 @@ async function startTurn(
       if (told) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${told}`, ok: true, setup: true } });
       if (personTurn && (!takeoverScope || limitTakeover.firstIncident(bot.id, bot.modelSelection, takeoverScope, e instanceof TurnUsageLimitRefusedError ? e.resetsAt : undefined))) {
         if (!told) notify(
-          buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+          buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }, personLanguages.forLine(threadPersonKey(threadId))),
         );
         reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
       }
@@ -8811,9 +8813,9 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   const card = existing || run.target === "room-goal" || (run.threadId !== sourceThreadId && !automationReports.speaksFor(run)) ? routineRunCard(run) : null;
   const statusChanged = card !== null && existing?.routineRun?.status !== run.status;
   if (existing && card) {
-    store.patchMessage(sourceThreadId, existing.id, { text: routineRunFallbackText(card), routineRun: card });
+    store.patchMessage(sourceThreadId, existing.id, { text: routineRunFallbackText(card, personLanguages.forLine(threadPersonKey(sourceThreadId))), routineRun: card });
   } else if (card) {
-    const message: Omit<Message, "id" | "at"> = { role: "bot", kind: "routine.run", text: routineRunFallbackText(card), routineRun: card };
+    const message: Omit<Message, "id" | "at"> = { role: "bot", kind: "routine.run", text: routineRunFallbackText(card, personLanguages.forLine(threadPersonKey(sourceThreadId))), routineRun: card };
     if (source.group) {
       message.from = { botId: source.bot.id, name: source.bot.name, color: source.bot.color };
     }
@@ -9003,7 +9005,7 @@ routines = new RoutineManager({
     const said = alert?.detail ?? run.error, detail = said ? `${run.routineName}: ${said}` : run.routineName;
     automationReports.runFailed(run, said ?? "");
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
-    notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
+    notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail, undefined, personLanguages.forLine(routineSourceThread(run) ?? run.threadId ?? bot.threadId)));
     reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
   },
   onRunDeferred: (run, alert) => {
@@ -9011,7 +9013,7 @@ routines = new RoutineManager({
     if (!bot) return;
     const minutes = run.deferredAt != null && run.deferredNoticeAt != null ? Math.max(1, Math.round((run.deferredNoticeAt - run.deferredAt) / 60_000)) : null;
     const detail = `${redactSecretsInText(run.routineName)}: ${alert?.detail ?? `target busy${minutes != null ? ` for ${minutes} minutes` : ""}`}`;
-    notify(buildNotification("routine-deferred", routineSourceOwner(run)?.bot ?? bot, routineSourceThread(run) ?? bot.threadId, detail));
+    notify(buildNotification("routine-deferred", routineSourceOwner(run)?.bot ?? bot, routineSourceThread(run) ?? bot.threadId, detail, undefined, personLanguages.forLine(routineSourceThread(run) ?? bot.threadId)));
   },
 });
 phones.adoptRoutines(); routineHolds?.attach(routines);
@@ -9065,6 +9067,9 @@ store.reconcileInterruptedGroupGoals((runId, threadId) => {
         : "OpenMausBot restarted before this scheduled team goal finished."
   );
   return { status, detail, finishedAt: run.finishedAt ?? groupGoalRecoveryAt };
+}, serverLine(appLanguage(), "server.rooms.goalRecovery.restarted"), Date.now(), (threadId, status, detail) => {
+  const key = status === "needs-input" ? "server.rooms.goalRecovery.needsInput" : status === "limit-reached" ? "server.rooms.goalRecovery.limitReached" : status === "completed" ? "server.rooms.goalRecovery.completed" : status === "blocked" ? "server.rooms.goalRecovery.blocked" : status === "paused" ? "server.rooms.goalRecovery.paused" : status === "stopped" ? "server.rooms.goalRecovery.stopped" : status === "failed" ? "server.rooms.goalRecovery.failed" : "server.rooms.goalRecovery.restarted";
+  return serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, { detail });
 });
 calendarCalls = new CalendarCallManager({
   botExists: (botId) => Boolean(store.bot(botId)),
@@ -9333,10 +9338,10 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
   return null;
 };
 const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
-const teamMemoryRequests = createTeamMemoryRequests({ teamMemory, store, sectionKey: sectionContextKey, decide: (row) => appendDecision(DATA_DIR, row) });
+const teamMemoryRequests = createTeamMemoryRequests({ teamMemory, store, sectionKey: sectionContextKey, decide: (row) => appendDecision(DATA_DIR, row), language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)) });
 const outboundRequests = new OutboundRequestService();
 const outboundCounts = new OutboundCounts(join(DATA_DIR, "outbound-counts.json"));
-const outboundHold = createOutboundHold({ store, dataDir: DATA_DIR, outboundRequests, outboundCounts, holdMs: OUTBOUND_HOLD_MS, connectorThread, activeGroupTurnForBot, notify });
+const outboundHold = createOutboundHold({ store, dataDir: DATA_DIR, outboundRequests, outboundCounts, holdMs: OUTBOUND_HOLD_MS, connectorThread, activeGroupTurnForBot, notify, language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)) });
 
 function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: "allow" | "deny" | "answer"): boolean {
   const remembered = teamMemoryRequests.resolve(threadId, requestId, behavior);
@@ -9392,6 +9397,7 @@ const modelRequests = new ModelRequestService({
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, hasTeamAuthority, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
+  language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)),
   autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
@@ -9735,11 +9741,10 @@ const roomTranscript = createRoomTranscript({ store, teammateReportContext });
 const roomPostBudgets = new Map<string, RoomPostBudget>();
 const ROOM_POST_MAX_CHARS = 4_000;
 
-const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAccessForSource,
-  onPeerApprovalPending: (from, target, action, sourceThreadId, message) => void reportEscalation({
+const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAccessForSource, lineLanguage: (threadId) => threadId ? personLanguages.forLine(threadPersonKey(threadId)) : appLanguage(), onPeerApprovalPending: (from, target, action, sourceThreadId, message) => void reportEscalation({
     kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message, alreadyNotified: true }) };
 
-const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coordinator, registry, turnStops, approvalBus, hostedModels, providerConfigs, policyModelRefusal, checkedTaskModelSwitch, threadBusy, directRequestOwners, startOrQueueDirectMessage, takeover: limitTakeover });
+const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coordinator, registry, turnStops, approvalBus, hostedModels, providerConfigs, policyModelRefusal, checkedTaskModelSwitch, threadBusy, directRequestOwners, startOrQueueDirectMessage, takeover: limitTakeover, language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)) });
 
 // Peer approvals live only in memory: settle every peer card still open on disk, or it locks the composer forever.
 {
@@ -9800,7 +9805,7 @@ async function runClaimedGroupMemberTurn(
     noteHeldSkip(group.id, threadId, bot, latestRoomTextId(threadId));
     if (orchestration) {
       orchestration.result.outcome = "unavailable";
-      orchestration.result.stopReason = heldMemberLine(bot.name);
+      orchestration.result.stopReason = heldMemberLine(bot.name, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params));
     }
     return true;
   }
@@ -9842,7 +9847,7 @@ async function runClaimedGroupMemberTurn(
       orchestration.result.outcome = "busy";
       return true;
     }
-    const message = `${bot.name} is busy in another conversation — skipped this round`;
+    const message = serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.busySkip", { bot: bot.name });
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -10013,7 +10018,7 @@ async function runClaimedGroupMemberTurn(
       orchestration.result.outcome = "busy";
       return true;
     }
-    const message = `${readyBot.name}'s settings changed while starting — skipped this round`;
+    const message = serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.settingsChangedSkip", { bot: readyBot.name });
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -10029,7 +10034,7 @@ async function runClaimedGroupMemberTurn(
       orchestration.result.outcome = "busy";
       return true;
     }
-    const message = `${bot.name}'s computer provider is being updated — skipped this round`;
+    const message = serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.providerUpdatingSkip", { bot: bot.name });
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -10044,7 +10049,7 @@ async function runClaimedGroupMemberTurn(
       orchestration.result.outcome = "busy";
       return true;
     }
-    const message = `${bot.name}'s cloud computer is being changed — skipped this round`;
+    const message = serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.cloudComputerChangingSkip", { bot: bot.name });
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -10059,7 +10064,7 @@ async function runClaimedGroupMemberTurn(
       orchestration.result.outcome = "busy";
       return true;
     }
-    const message = `${bot.name} became busy in another conversation — skipped this round`;
+    const message = serverLine(personLanguages.forLine(threadId), "server.index.becameBusySkip", { bot: bot.name });
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -10314,7 +10319,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: briefCrossingLabel(bot.name, crossing.count), ok: true },
+        tool: { name: briefCrossingLabel(bot.name, crossing.count, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params)), ok: true },
       });
     }
   }
@@ -10371,7 +10376,7 @@ async function runClaimedGroupMemberTurn(
     if (heldBeforeDispatch && !isCancelled?.()) {
       if (orchestration) {
         orchestration.result.outcome = "unavailable";
-        orchestration.result.stopReason = heldMemberLine(bot.name);
+        orchestration.result.stopReason = heldMemberLine(bot.name, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params));
       }
       return true;
     }
@@ -10401,14 +10406,14 @@ async function runClaimedGroupMemberTurn(
     let unsub = () => {};
     let unregisterStall = () => {};
     const deadline = new RoomTurnDeadline(timeoutMinutes, () => {
-      if (orchestration) orchestration.result.stopReason = stoppedTurnText(threadId, providerTurnId, roomTurnTimeoutMessage(bot.name, timeoutMinutes));
+      if (orchestration) orchestration.result.stopReason = stoppedTurnText(threadId, providerTurnId, roomTurnTimeoutMessage(bot.name, timeoutMinutes, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params)));
       abandonProviderTurn();
       void instance.adapter.interruptTurn(threadId).catch(() => {});
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: roomTurnTimeoutMessage(bot.name, timeoutMinutes), ok: false },
+        tool: { name: roomTurnTimeoutMessage(bot.name, timeoutMinutes, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params)), ok: false },
       });
       finish("timed_out");
     });
@@ -10466,7 +10471,7 @@ async function runClaimedGroupMemberTurn(
     if (roomReset) {
       store.appendMessage(threadId, {
         role: "bot", kind: "activity", from: { botId: readyBot.id, name: readyBot.name, color: readyBot.color },
-        tool: { name: roomResetNote(readyBot.name, roomReset), ok: true },
+        tool: { name: roomResetNote(readyBot.name, roomReset, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params)), ok: true },
       });
     }
     if (roomReset || displaced) broadcast({ kind: "group", group: publicGroupState(store.group(groupId) ?? group) });
@@ -10606,7 +10611,7 @@ async function runClaimedGroupMemberTurn(
   if (heldMidTurn) {
     if (orchestration) {
       orchestration.result.outcome = "unavailable";
-      orchestration.result.stopReason = heldMemberLine(bot.name);
+      orchestration.result.stopReason = heldMemberLine(bot.name, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params));
     }
     return true;
   }
@@ -10629,7 +10634,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: finishedWithoutSummaryLine(bot.name, reasking), ok: false },
+      tool: { name: finishedWithoutSummaryLine(bot.name, reasking, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key, params)), ok: false },
     });
     if (!reasking) return true;
     summaryReasks.add(reaskKey);
@@ -10677,7 +10682,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         tool: {
-          name: `${peer.name} isn't in this room, so that mention didn't reach them — add them to the room to bring them in.`,
+          name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.notInRoom", { bot: peer.name }),
           ok: false,
         },
       });
@@ -10979,7 +10984,7 @@ function startGroupTurn(
       role: "bot",
       kind: "activity",
       tool: {
-        name: `${mentionedArchived.name} is archived and can't respond — restore it or mention an active room member.`,
+        name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.archivedMember", { bot: mentionedArchived.name }),
         ok: false,
       },
     });
@@ -11010,9 +11015,9 @@ function startGroupTurn(
     const defaultArchived = archived.find((member) => member.id === defaultArchivedId);
     let unavailableMessage: string | undefined;
     if (!mentionedArchived && !availableMembers.length) {
-      unavailableMessage = "No active room members can respond — restore an archived bot or add an active member.";
+      unavailableMessage = serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.noActiveMembers");
     } else if (!mentionedArchived && defaultArchived) {
-      unavailableMessage = `${defaultArchived.name} is archived and can't respond — restore it or mention an active room member.`;
+      unavailableMessage = serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.archivedMember", { bot: defaultArchived.name });
     }
     if (unavailableMessage) {
       store.appendMessage(threadId, {
@@ -11067,7 +11072,7 @@ function startGroupTurn(
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `${owner?.name ?? "A room member"} is still stopping — this message was not dispatched`, ok: false },
+        tool: { name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.memberStillStopping", { member: owner?.name ?? serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.roomMember") }), ok: false },
       });
       return;
     }
@@ -11411,7 +11416,7 @@ function appendSkillRequestCard(args: {
   };
 } & Pick<SkillRequestCardData, "shared">): { requestId: string; summary: string } {
   const requestId = randomUUID();
-  const copy = skillCardCopy(args.staged);
+  const copy = skillCardCopy({ ...args.staged, language: personLanguages.forLine(threadPersonKey(args.threadId)) });
   const payload: SkillRequestCardData = {
     version: 1,
     requestId,
@@ -11671,7 +11676,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key, language: (threadId) => personLanguages.forLine(threadPersonKey(threadId)) });
 ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
@@ -11706,7 +11711,7 @@ function requestSignIn(from: BotRecord, threadId: string, rawSite: unknown, rawR
   const message = store.appendMessage(threadId, {
     role: "bot",
     kind: "signin",
-    text: signInFallbackText(from.name, target.site),
+    text: signInFallbackText(from.name, target.site, (bot, site) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.routines.signIn.fallback", { bot, site })),
     ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
     signIn: { url: target.url, site: target.site, place, ...(reason ? { reason } : {}) },
   });
@@ -11721,7 +11726,7 @@ function requestSignIn(from: BotRecord, threadId: string, rawSite: unknown, rawR
     avatarUrl: from.avatarUrl,
     ...(owner.group ? { group: { id: owner.group.id, name: owner.group.name } } : {}),
     site: target.site,
-  }));
+  }, personLanguages.forLine(threadPersonKey(threadId))));
   return { messageId: message.id, site: target.site, place };
 }
 
@@ -12078,7 +12083,7 @@ async function stopCompanyInstances(ids: string[]) {
     watchdog.settle(threadId); closeOpenApprovals(threadId); directTurnBots.delete(threadId);
     routines?.failThread(threadId, "Company connection changed while this thread was running", { stopReason: "interrupted" });
     if (store.taskByThread(botId, threadId)) {
-      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Company connection changed — choose whether to reconnect or use a personal model", ok: false } });
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.companyConnectionChanged"), ok: false } });
       store.setTaskActivity(botId, threadId, "idle");
     }
   }
@@ -12294,14 +12299,14 @@ ROUTES.push(createThreadRoutes({
   companionMutationToken: () => companionMutationToken,
   cliOwnerToken: () => cliOwnerToken,
   pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
-  botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, memberDefaultBot: CLOUD_TEAM ? (email) => ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name }) : undefined,
+  botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, memberDefaultBot: CLOUD_TEAM ? (email) => ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name, language: personLanguages.forLine(email) }) : undefined,
   uploads: uploadsFor(createUploadOwners(DATA_DIR), Boolean(CLOUD_TEAM)),
   attachmentInUse: (name) => threadsReferencing(name).length > 0 || store.bots.some((bot) => bot.avatarUrl === `/api/attachments/${name}`),
 }));
 ROUTES.push(createBotCreateRoutes({
   store, cfg, presetStore, orgInstallStatuses,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
-  maxWorkspaceBots: MAX_WORKSPACE_BOTS, cloudOwnerKey: CLOUD_OWNER_KEY,
+  maxWorkspaceBots: MAX_WORKSPACE_BOTS, cloudOwnerKey: CLOUD_OWNER_KEY, lineLanguage: (auth) => personLanguages.forLine(auth.kind === "session" ? actorKey(auth) : undefined),
   hostedModels, cloudRoutineAuthors,
   routines: () => routines,
   storedAvatarExists, defaultSelection, checkedModelSelection, cloudOwnerSession, wireBot, team: CLOUD_TEAM && teamOwners.people ? { name: CLOUD_TEAM.name, people: teamOwners.people } : null,
@@ -12365,12 +12370,12 @@ ROUTES.push(createBotMemoryRoutes({
     broadcast({ kind: "config", ...configStatus() });
   },
 }));
-const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : (CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin")) || ownHome.owner(auth) ? { person: actorKey(auth as RequestAuth & { kind: "session" }), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createSetupRequestRoutes({ store, language: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, sendRefusal: cloudGuestSendRefusal, presser: (auth) => setupPresser(sharedMembership(), auth, messageSender(auth)), canSetUp: (botId, threadId) => registry.get(store.projectBotForTask(botId, threadId)?.modelSelection.instanceId ?? "")?.adapter.capabilities.agentsMcp === true, send: (auth, botId, threadId, text) => acceptDirectSend({ botId, threadId, text, sender: messageSender(auth), trigger: usageTriggerFor(auth), personPresent: auth.kind === "session" || DESKTOP_MANAGED }) }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), ownHome: ownHome.owner, automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks, messages: teamMessages.needsYou } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }), createInboxRoutes(teamMessages));
+const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : (CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin")) || ownHome.owner(auth) ? { person: actorKey(auth as RequestAuth & { kind: "session" }), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createSetupRequestRoutes({ store, language: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, sendRefusal: cloudGuestSendRefusal, presser: (auth) => setupPresser(sharedMembership(), auth, messageSender(auth)), canSetUp: (botId, threadId) => registry.get(store.projectBotForTask(botId, threadId)?.modelSelection.instanceId ?? "")?.adapter.capabilities.agentsMcp === true, send: (auth, botId, threadId, text) => acceptDirectSend({ botId, threadId, text, sender: messageSender(auth), trigger: usageTriggerFor(auth), personPresent: auth.kind === "session" || DESKTOP_MANAGED }) }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, lineLanguage: (threadId) => personLanguages.forLine(threadPersonKey(threadId)), chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), ownHome: ownHome.owner, automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks, messages: teamMessages.needsYou } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }), createInboxRoutes(teamMessages));
 if (CLOUD_TEAM) teamHost.adoptServerProfile(sessions.list().flatMap((session) => session.email ? [session.email] : []));
-ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }), createPresenceRoutes({ isOwner: ownerOrAdmin, heard: (auth, language) => personLanguages.heard(auth.kind === "session" ? actorKey(auth) : THIS_COMPUTER, language), active: async (source, zone, language) => { const answer = await proactive.brief.active(source, zone, language); firstHourHooks.arrived(); return answer; }, ...(CLOUD_TEAM ? { member: teamMessages.arrived } : {}) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
+ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot, line: (auth, key) => serverLine(auth.kind === "session" ? personLanguages.forLine(actorKey(auth)) : appLanguage(), key) }), createPresenceRoutes({ isOwner: ownerOrAdmin, heard: (auth, language) => personLanguages.heard(auth.kind === "session" ? actorKey(auth) : THIS_COMPUTER, language), active: async (source, zone, language) => { const answer = await proactive.brief.active(source, zone, language); firstHourHooks.arrived(); return answer; }, ...(CLOUD_TEAM ? { member: teamMessages.arrived } : {}) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
   createTeamConnectionRoutes({ host: teamConnections, cfg: () => cfg, composio, publicOrigin: CLOUD_HOME?.publicOrigin ?? null, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), createSignInCardRoutes({ settle: signInSettle.settle, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: { error: memberLoginRefusal(CLOUD_TEAM) } }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
 ROUTES.push(createRoomHoldRoutes({
-  group: (id) => store.group(id),
+  group: (id) => store.group(id), line: (auth, key) => serverLine(auth.kind === "session" ? personLanguages.forLine(actorKey(auth)) : personLanguages.forLine(THIS_COMPUTER), key),
   groupFor: personRooms.groupForAuth,
   setHold: (groupId, botId, held) => {
     const updated = setRoomHold(groupId, botId, held);
@@ -12389,7 +12394,7 @@ ROUTES.push(createGroupRoutes({
   groupFor: personRooms.groupForAuth,
 }));
 ROUTES.push(createChannelRoutes({
-  store, threadRead: teamMessages.seen,
+  store, threadRead: teamMessages.seen, line: (threadId, key) => serverLine(personLanguages.forLine(threadPersonKey(threadId)), key),
   personMarkRoom: personRooms.personMarkRoom,
   groupFor: personRooms.groupForAuth,
   cfg,
@@ -12581,6 +12586,7 @@ ROUTES.push(createStatusRoutes({
 ROUTES.push(desktopViewer.route);
 ROUTES.push(createBrowserViewerRoutes({
   upgrades, viewers: browserLive, dataDir: DATA_DIR, person: (auth) => (auth.kind === "session" ? actorKey(auth) : "local-owner"),
+  lineLanguage: (person) => personLanguages.forLine(person),
   audience: (auth, threadId) => teamHost.viewerBrowserAudience({ threadId, sees: (id) => visibleTo(viewerFor(auth)).thread(id), person: auth.kind === "session" ? actorKey(auth) : null }),
   browser: async (botId, audience) => {
     const bot = store.bot(botId);
@@ -12623,6 +12629,7 @@ function liveCallTitle(botId: string, threadId: string, excerpt: string): Promis
 }
 const liveCalls = new LiveCallController({
   store,
+  lineLanguage: (threadId) => threadId ? personLanguages.forLine(threadPersonKey(threadId)) : appLanguage(),
   send: async ({ auth, botId, threadId, text, callId }) => {
     if (!liveSignedIn(auth)) throw new LiveCallSignedOutError();
     const receipt = await acceptDirectSend({
@@ -12663,6 +12670,7 @@ const liveCalls = new LiveCallController({
     const row = recordLiveCall({
       chatExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
       appendMessage: (threadId, message) => store.appendMessage(threadId, message),
+      line: (key, params) => serverLine(personLanguages.forLine(threadPersonKey(input.threadId)), key, params),
     }, input);
     if (row) {
       void titleLiveCall({
@@ -13526,7 +13534,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { rooms: rooms.slice(0, 50), unpostable: unpostable.slice(0, 50) });
       }
-      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), outsideDriven: () => outsideDrivenThread(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability) };
+      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, language: personLanguages.forLine(threadPersonKey(internalCapability.threadId)), ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), outsideDriven: () => outsideDrivenThread(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability) };
       if (await dispatchRoutes([appTriggers.internalRoutes(triggerContext)], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/trigger-requests") {
         const from = internalSender;
@@ -13549,7 +13557,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (cloudGuestDriven(fromThreadId)) return json(res, 403, { error: "Only the Cloud's owner can set up or change webhook triggers. Tell the person to ask from their own conversation." });
           let applied: ReturnType<WebhookRequestService["submit"]>;
           try {
-            applied = webhookRequests.submit({ botId: from.id, threadId: fromThreadId, operation: { ...request.operation, forBot }, from: sender, canCommit: () => internalCapabilityIsActive(internalCapability) });
+            applied = webhookRequests.submit({ botId: from.id, threadId: fromThreadId, operation: { ...request.operation, forBot }, from: sender, language: personLanguages.forLine(threadPersonKey(fromThreadId)), canCommit: () => internalCapabilityIsActive(internalCapability) });
           } catch (error) {
             return json(res, error instanceof WebhookRequestError ? error.status : (error as { status?: number }).status ?? 400, { error: error instanceof Error ? error.message : String(error) });
           }
@@ -13568,6 +13576,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const proposed = await routineRequests.submit({
           botId: from.id,
           threadId: fromThreadId,
+          language: personLanguages.forLine(threadPersonKey(fromThreadId)),
           proposal: proposedInput,
           from: sender,
           canCommit: () => internalCapabilityIsActive(internalCapability),
@@ -13646,6 +13655,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           botId: from.id,
           threadId: body.fromThreadId,
           targetBotId,
+          language: personLanguages.forLine(threadPersonKey(body.fromThreadId)),
           changes: body.changes,
           reason: body.reason,
           from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
@@ -13675,6 +13685,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           botId: from.id,
           threadId: body.fromThreadId,
           targetBotId: body.forBotId?.trim() || from.id,
+          language: personLanguages.forLine(threadPersonKey(body.fromThreadId)),
           selection: body.modelSelection,
           reason: body.reason,
           from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
@@ -13724,7 +13735,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           role: "bot",
           kind: "activity",
           from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: recallCrossingLabel(bot.name, crossing.count), ok: true },
+          tool: { name: recallCrossingLabel(bot.name, crossing.count, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(roomThreadId)), key, params)), ok: true },
         });
       };
       if (method === "GET" && path === "/api/internal/session-search") {
@@ -14001,7 +14012,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 : lane
                   ? `runs in its own thread "${lane.title}", in parallel with the other room jobs; its result posts in this room and ${returns}`
                   : title
-                    ? `${outsideRoomNote(addressedRoom, via)}sent to "${title}"; it runs after anything still running there`
+                    ? `${outsideRoomNote(addressedRoom, via, (key, params) => serverLine(personLanguages.forLine(threadPersonKey(address.threadId)), key, params))}sent to "${title}"; it runs after anything still running there`
                     : "handed to the coordinator; the teammate's turn has not started yet"),
               requestId: node.id,
               ...(via === "room" ? {} : { threadId: node.threadId }),
@@ -14009,7 +14020,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!duplicate) {
               if (!EXTERNAL) delegatedThisTurn(node.id);
               store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via,
-                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title }));
+                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title,
+                line: (key, params) => serverLine(personLanguages.forLine(threadPersonKey(address.threadId)), key, params) }));
             }
           } catch (error) {
             if (createdThread) store.deleteTask(target.botId, createdThread);
@@ -14267,7 +14279,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const chip: Omit<Message, "id" | "at"> = {
           role: "bot",
           kind: "activity",
-          tool: { name: `Posted in ${room.name}`, ok: true },
+          tool: { name: serverLine(personLanguages.forLine(threadPersonKey(fromThreadId)), "server.index.postedIn", { room: room.name }), ok: true },
           comm: { groupId: room.id, withBotId: poster.id, withName: room.name, withColor: poster.color },
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
@@ -14321,7 +14333,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
             kind: "activity",
-            tool: { name: `Opened thread #${task.title}`, ok: true },
+            tool: { name: serverLine(personLanguages.forLine(threadPersonKey(fromThreadId)), "server.index.openedThread", { title: task.title }), ok: true },
             threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
           };
           if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };
@@ -14811,8 +14823,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const connected = connectionState[item.slug]?.connected === true;
           const status = item.alias ? "required" : connected ? "connected" : "required";
           const description = item.alias
-            ? `Connect ${toolkit.label} as “${item.alias}” so the bot can continue`
-            : toolkit.blurb || `Connect ${toolkit.label} so the bot can continue`;
+            ? serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.connectAlias", { app: toolkit.label, alias: item.alias })
+            : toolkit.blurb || serverLine(personLanguages.forLine(threadPersonKey(threadId)), "server.index.connectApp", { app: toolkit.label });
           const message = store.appendMessage(threadId, {
             role: "bot",
             kind: "connector",
@@ -15652,7 +15664,7 @@ for (const row of chatFollowups()) {
   if (!messages.some((message) => message.queueId === row.id && message.kind === "activity")) {
     store.appendMessage(row.threadId, {
       role: "bot", kind: "activity", queueId: row.id,
-      tool: { name: "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.", ok: false },
+      tool: { name: serverLine(personLanguages.forLine(threadPersonKey(row.threadId)), "server.index.queuedFollowupInterrupted"), ok: false },
     });
   }
   settleChatFollowups([row.id], null);

@@ -50,6 +50,7 @@ export interface InternalTriggerContext {
   /** A run a webhook or app event started, or work one handed on. */
   outsideDriven: () => boolean;
   canCommit: () => boolean;
+  language?: string;
 }
 
 const GUEST_REFUSAL = "Only the Cloud's owner can make a bot watch their connected apps. Tell the person to ask from their own conversation.";
@@ -203,7 +204,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
       return json(res, 403, { error: `${owner.name} has not been given access to ${appLabel(app)}. Ask the person to allow it under the bot's Access settings; do not retry until they have.` });
     }
     try {
-      const applied = await requests.submit({ botId: input.from.id, threadId: input.threadId, operation: { ...input.operation, forBot: input.forBot }, from: input.sender, canCommit: input.canCommit });
+      const applied = await requests.submit({ botId: input.from.id, threadId: input.threadId, operation: { ...input.operation, forBot: input.forBot }, from: input.sender, canCommit: input.canCommit, language: input.language });
       deps.audit({ threadId: input.threadId, requestId: applied.requestId, botId: input.from.id, botName: input.from.name,
         tool: applied.action === "create" ? "create_trigger" : "manage_trigger", summary: applied.summary });
       return json(res, 201, applied);

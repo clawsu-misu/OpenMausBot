@@ -9,6 +9,7 @@ import {
   RoutineRequestService,
   consequenceLine,
   routineRequestFingerprint,
+  scheduleText,
   type RoutineProposalInput,
   type RoutineRequestMessage,
   type RoutineRequestOptionCard,
@@ -18,6 +19,7 @@ import {
 import { RoutineManager, type RoutineInput } from "./routines.ts";
 import type { JsonValue } from "./schema.ts";
 import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
+import "./server-line-packs.ts";
 
 class MemoryStore implements RoutineRequestStore {
   readonly threads = new Map<string, RoutineRequestMessage[]>();
@@ -1884,6 +1886,15 @@ describe("cross-bot routine targeting", () => {
   });
 });
 
+describe("localized schedule text", () => {
+  it("uses the English date format when the language is empty or malformed", () => {
+    const schedule = { type: "once" as const, at: Date.UTC(2026, 0, 2, 15, 4) };
+    const english = scheduleText(schedule, "UTC", undefined, "en");
+    expect(scheduleText(schedule, "UTC", undefined, "")).toBe(english);
+    expect(scheduleText(schedule, "UTC", undefined, "not_a_locale")).toBe(english);
+  });
+});
+
 describe("consequenceLine", () => {
   it("uses singular wording for one run a day and one day a week", () => {
     expect(consequenceLine({ type: "interval", everyMinutes: 1440 })).toBe(
@@ -1896,6 +1907,11 @@ describe("consequenceLine", () => {
       "Will run 2 days a week; each run starts a fresh session.",
     );
     expect(consequenceLine({ type: "once", at: 0 })).toBe("Will run once; that run starts a fresh session.");
+  });
+
+  it("keeps English as the default and localizes routine consequences", () => {
+    expect(consequenceLine({ type: "daily", time: "09:00", weekdays: [1] }, false, "zh-CN"))
+      .toBe("将每周一天运行；每次运行都会从新会话开始。");
   });
 });
 

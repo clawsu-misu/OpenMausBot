@@ -1,4 +1,5 @@
 import { failedTurnTool } from "../../shared/failed-turn.ts";
+import { serverLine, type LineLanguage } from "../server-lines.ts";
 import { admit } from "../admission.ts";
 import { memoryStopped } from "../engine-memory.ts";
 import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, type Escalation, type EscalationKind } from "../escalations.ts";
@@ -43,6 +44,7 @@ export interface ChiefNoticeDeps {
   quietThread?(botId: string, threadId: string): boolean;
   /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
   privateThread?(threadId: string): boolean;
+  lineLanguage?: LineLanguage;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
    * is theirs alone), into a notices chat of that person's own. */
   routing?: {
@@ -250,7 +252,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       const chief = chiefForBot(store.bots, bot);
       return deliver({
         chief: chief && escalationDeliverable(chief, bot) ? chief : null, title: ESCALATIONS_THREAD_TITLE, bot, threadId,
-        chip: escalationChip(escalation), text: escalationText(escalation, count), alreadyNotified: input.alreadyNotified,
+        chip: escalationChip(escalation, (key, params) => serverLine(deps.lineLanguage?.(threadId), key, params)), text: escalationText(escalation, count), alreadyNotified: input.alreadyNotified,
       });
     } catch (error) {
       console.warn(`escalation for thread ${input.threadId} not delivered: ${error instanceof Error ? error.message : String(error)}`);

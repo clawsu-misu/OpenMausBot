@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCreditMoves, type CreditMovesOptions } from "./cloud-credit-moves.ts";
+import "./server-line-packs.ts";
 import type { ModelSelection } from "./contracts.ts";
 import type { SelectableInstance } from "./default-model-selection.ts";
 
@@ -29,7 +30,7 @@ describe("which engine a Cloud home's bots run on while it has the trial credit"
   const storage = () => { const directory = join(data, "providers", "trial-credit"); mkdirSync(directory, { recursive: true }); return directory; };
   const moved = () => JSON.parse(readFileSync(join(storage(), "moved.json"), "utf8")) as Record<string, ModelSelection>;
   const find = (id: string) => bots.find(candidate => candidate.id === id)!;
-  const make = () => createCreditMoves({
+  const make = (lineLanguage?: string) => createCreditMoves({
     credit: { owns: id => id === CREDIT, status: () => status, storage },
     store: {
       get bots() { return bots; },
@@ -47,6 +48,7 @@ describe("which engine a Cloud home's bots run on while it has the trial credit"
     saveDefault: selection => { saved = { defaultModelSelection: selection, ...(saved.profile ? { profile: selection } : {}) }; },
     threadBusy: (botId, threadId) => busy.has(`${botId}/${threadId}`),
     engineName: id => ({ claude: "Claude", codex: "Codex" })[id] ?? id,
+    ...(lineLanguage ? { lineLanguage: () => lineLanguage } : {}),
   });
 
   beforeEach(() => {
@@ -102,6 +104,13 @@ describe("which engine a Cloud home's bots run on while it has the trial credit"
     expect(saved.defaultModelSelection).toEqual({ instanceId: "codex", model: "gpt-5.5" });
     expect(notices.filter(line => line.threadId === "copied-main")).toEqual([{ threadId: "copied-main", name: "notice: Codex is connected, so this conversation uses it now instead of the trial Claude credit." }]);
     expect(moved()).toEqual({});
+  });
+
+  it("writes the connected-engine notice in the thread owner's language", () => {
+    const moves = make("zh-CN");
+    moves.settle([credit(), claude(false), codex(false)]);
+    moves.settle([credit(), claude(true), codex(false)]);
+    expect(notices.find(line => line.threadId === "copied-main")?.name).toContain("提示：Claude 已连接");
   });
 
   it("puts a copied bot back on its own engine and model when that is the one signed in", () => {

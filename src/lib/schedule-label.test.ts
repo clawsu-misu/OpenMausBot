@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { setLocale, t } from "@/lib/i18n";
+import { atLocalTime } from "./routine-calendar";
 
-import { intervalLabel, scheduleLabel, scheduleSentence, whenLabel } from "./schedule-label";
+import { dayNames, intervalLabel, niceDate, niceTime, scheduleLabel, scheduleSentence, whenLabel } from "./schedule-label";
+import { describeCronSchedule } from "../../shared/cron-label";
 
 describe("schedule labels", () => {
+  beforeEach(() => setLocale("en"));
+  afterEach(() => setLocale("en"));
   it.each([
     ["0 9 1 * *", "Monthly on day 1 at 9:00"],
     ["30 8 L * *", "Monthly on the last day at 8:30"],
@@ -47,11 +52,42 @@ describe("schedule labels", () => {
 
   it("labels a change by time today and by date otherwise", () => {
     const now = Date.now();
-    expect(whenLabel(now)).toBe(new Date(now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    expect(whenLabel(now)).toBe(new Date(now).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" }));
     const lastYear = new Date(now);
     lastYear.setFullYear(lastYear.getFullYear() - 1);
     expect(whenLabel(lastYear.getTime())).toBe(
-      lastYear.toLocaleDateString([], { month: "short", day: "numeric" }),
+      lastYear.toLocaleDateString("en", { month: "short", day: "numeric" }),
     );
+  });
+
+  it("formats dates using the application language instead of the system language", () => {
+    setLocale("zh");
+    const date = new Date(2026, 8, 8, 12, 30);
+    expect(niceDate(date.getTime())).toBe(date.toLocaleDateString("zh", { weekday: "long", month: "long", day: "numeric" }));
+    expect(niceTime(date.getTime())).toBe(date.toLocaleTimeString("zh", { hour: "numeric", minute: "2-digit" }));
+  });
+
+  it("localizes human schedule wording with the selected app language", () => {
+    setLocale("zh");
+    const schedule = { type: "daily" as const, time: "09:00", weekdays: [1, 2, 3, 4, 5] };
+    const expected = t("format.schedule.at", {
+      label: t("format.schedule.everyWeekday"),
+      time: niceTime(atLocalTime(Date.now(), schedule.time)),
+    });
+    expect(scheduleLabel(schedule)).toBe(expected);
+    expect(expected).toContain("工作日");
+  });
+
+  it("returns weekday names from the currently selected app language", () => {
+    setLocale("de");
+    expect(dayNames("long")).toEqual(Array.from({ length: 7 }, (_, day) =>
+      new Intl.DateTimeFormat("de", { weekday: "long" }).format(new Date(2024, 0, 7 + day))));
+  });
+
+  it("exposes structured descriptions for familiar cron presets and keeps arbitrary expressions intact", () => {
+    expect(describeCronSchedule({ type: "cron", expression: "0 9 1 * *", timeZone: "UTC" }))
+      .toEqual({ kind: "monthlyDay", day: 1, time: "9:00" });
+    expect(describeCronSchedule({ type: "cron", expression: "*/15 9-17 * * 1-5", timeZone: "UTC" }))
+      .toEqual({ kind: "expression", expression: "*/15 9-17 * * 1-5" });
   });
 });

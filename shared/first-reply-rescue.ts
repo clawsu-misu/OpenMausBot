@@ -22,17 +22,19 @@ export interface FirstReplyRescue {
   over?: true;
 }
 
+export type FirstReplyLine = (key: "server.rooms.firstReplyWaiting" | "server.rooms.firstReplyOver" | "server.rooms.firstReplySettled", params: { bot?: string; ai: string }) => string;
+
 /** The waiting row's words, for clients that print the tool name. */
-export function firstReplyWaitingName(botName: string, ai: string): string {
-  return `notice: ${botName} hasn't heard back from ${ai} yet.`;
+export function firstReplyWaitingName(botName: string, ai: string, line: FirstReplyLine = (_key, params) => `notice: ${params.bot} hasn't heard back from ${params.ai} yet.`): string {
+  return line("server.rooms.firstReplyWaiting", { bot: botName, ai });
 }
 
 /** The same row once its turn ended without an answer: history, true as it stands. */
-export function firstReplyOverName(botName: string, ai: string): string {
-  return `notice: ${botName} didn't hear back from ${ai}.`;
+export function firstReplyOverName(botName: string, ai: string, line: FirstReplyLine = (_key, params) => `notice: ${params.bot} didn't hear back from ${params.ai}.`): string {
+  return line("server.rooms.firstReplyOver", { bot: botName, ai });
 }
 
 /** The same row once the AI's first output arrived. */
-export function firstReplySettledName(ai: string): string {
-  return `notice: ${ai} answered after a slow start.`;
+export function firstReplySettledName(ai: string, line: FirstReplyLine = (_key, params) => `notice: ${params.ai} answered after a slow start.`): string {
+  return line("server.rooms.firstReplySettled", { ai });
 }

@@ -1,6 +1,7 @@
 import type { CalendarCall } from "./calendar-calls";
 import type { Routine, RoutineRun, RoutineSchedule } from "./routines";
 import { nextCronRuns } from "../../shared/routine-schedule";
+import { activeLocale, documentLanguage } from "@/lib/i18n";
 
 export const CALENDAR_SLOT_MINUTES = 5;
 const ROUTINE_MARKER_MINUTES = 30;
@@ -270,16 +271,12 @@ export function projectedRoutineItems(
 }
 
 export function calendarRangeLabel(from: number, days: number): string {
+  const locale = documentLanguage(activeLocale());
   const to = addDays(from, days - 1);
-  const start = new Date(from);
-  const end = new Date(to);
-  if (days === 1) {
-    return start.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
-  }
-  if (start.getMonth() === end.getMonth()) {
-    return `${start.toLocaleDateString([], { month: "long" })} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
-  }
-  return `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`;
+  const formatter = new Intl.DateTimeFormat(locale, days === 1
+    ? { dateStyle: "long" }
+    : { month: "long", day: "numeric", year: "numeric" });
+  return formatter.formatRange(new Date(from), new Date(to));
 }
 
 export type CallOccurrence = {

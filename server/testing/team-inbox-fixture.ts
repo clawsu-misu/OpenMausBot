@@ -23,7 +23,7 @@ export const session = (email: string) => ({ kind: "session", scopes: ["client"]
 type Task = { threadId: string; title: string; archivedAt?: number; activity?: string; routineRunId?: string };
 type Bot = Partial<Omit<BotRecord, "tasks">> & { id: string; name: string; threadId: string; tasks: Task[] };
 
-export function teamInbox(options: { team?: boolean; representative?: TeamMessagesDeps["inbox"]["representative"]; noChiefFor?: string[]; handed?: Record<string, string> } = {}) {
+export function teamInbox(options: { team?: boolean; representative?: TeamMessagesDeps["inbox"]["representative"]; noChiefFor?: string[]; handed?: Record<string, string>; lineLanguage?: TeamMessagesDeps["lineLanguage"] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-team-inbox-"));
   const listeners = new Set<(change: StoreChange) => void>();
   const emit = (change: StoreChange) => { for (const listener of listeners) listener(change); };
@@ -106,6 +106,7 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
       },
     }),
     notify: (notification) => { notified.push(notification); },
+    lineLanguage: options.lineLanguage,
     inbox: {
       askedPerson: (botId, threadId) => {
         const member = audienceMember(audienceOf(threadId));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident } from "./incidents.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 
@@ -95,6 +96,11 @@ describe("incident wording", () => {
     expect(text).toContain('Ada last said: "Starting the reconciliation now"');
     expect(text).toContain('retry_thread with bot_id "ada" and thread_id "t-ada"');
     expect(text).not.toContain("incident on that thread");
+    expect(incidentChip(incident)).toBe('Incident: Ada\'s run in its thread #Invoice reconciliation failed: "exit_before_result"');
+  });
+
+  it("localizes the person's incident chip while keeping English as the default", () => {
+    expect(incidentChip(incident, "zh")).toBe('事件：Ada 在其会话 #Invoice reconciliation 中的运行失败："exit_before_result"');
     expect(incidentChip(incident)).toBe('Incident: Ada\'s run in its thread #Invoice reconciliation failed: "exit_before_result"');
   });
 

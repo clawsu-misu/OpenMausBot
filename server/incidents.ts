@@ -2,6 +2,7 @@ import type { WireMessage as Message } from "../shared/wire.ts";
 import { withoutDeliveredNote } from "./peer-provenance.ts";
 import { botOwner } from "../shared/bot-owner.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
+import { serverLine } from "./server-lines.ts";
 
 export type IncidentKind = "failed" | "stalled" | "could-not-start" | "routine-failed";
 
@@ -103,18 +104,20 @@ const fold = (text: string, max: number): string => {
 
 const ordinal = (n: number): string => (n === 1 ? "first" : n === 2 ? "second" : n === 3 ? "third" : `${n}th`);
 
-function whatHappened(incident: Incident): string {
-  const where = incident.room ? `in the room "${incident.room}"` : incident.title ? `in its thread #${fold(incident.title, 60)}` : "in its main conversation";
-  const detail = incident.detail ? `: "${fold(incident.detail, 240)}"` : "";
+function whatHappened(incident: Incident, language?: string): string {
+  const where = incident.room ? serverLine(language, "server.incident.whereRoom", { room: incident.room })
+    : incident.title ? serverLine(language, "server.incident.whereThread", { title: fold(incident.title, 60) })
+      : serverLine(language, "server.incident.whereMain");
+  const detail = incident.detail ? serverLine(language, "server.incident.detail", { detail: fold(incident.detail, 240) }) : "";
   switch (incident.kind) {
     case "stalled":
-      return `${incident.bot.name}'s run ${where} stopped after showing no activity${detail}`;
+      return serverLine(language, "server.incident.stalled", { bot: incident.bot.name, where, detail });
     case "could-not-start":
-      return `${incident.bot.name}'s run ${where} could not start${detail}`;
+      return serverLine(language, "server.incident.couldNotStart", { bot: incident.bot.name, where, detail });
     case "routine-failed":
-      return `${incident.bot.name}'s scheduled routine ${where} failed${detail}`;
+      return serverLine(language, "server.incident.routineFailed", { bot: incident.bot.name, where, detail });
     default:
-      return `${incident.bot.name}'s run ${where} failed${detail}`;
+      return serverLine(language, "server.incident.failed", { bot: incident.bot.name, where, detail });
   }
 }
 
@@ -135,8 +138,8 @@ export function incidentContext(messages: readonly Pick<Message, "role" | "kind"
   };
 }
 
-export function incidentChip(incident: Incident): string {
-  return `Incident: ${whatHappened(incident)}`;
+export function incidentChip(incident: Incident, language?: string): string {
+  return serverLine(language, "server.incident.chip", { happened: whatHappened(incident, language) });
 }
 
 /** What OpenMausBot did about the failure before the Chief heard: it retried the run once and the retry failed as above,

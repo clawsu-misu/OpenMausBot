@@ -4,6 +4,7 @@ import { memberAudience } from "../audience.ts";
 import { ADA, CARL, key, BEN, CLEO, session, teamInbox } from "../testing/team-inbox-fixture.ts";
 import { ASSISTANT_HOURLY } from "./person-inbox.ts";
 import { MESSAGE_PERSON_HOURLY } from "./team-messages.ts";
+import { addServerLinePacks } from "../server-lines.ts";
 
 const fixtures: Array<ReturnType<typeof teamInbox>> = [];
 const fixture = (options: Parameters<typeof teamInbox>[0] = {}) => { const made = teamInbox(options); fixtures.push(made); return made; };
@@ -11,6 +12,24 @@ afterEach(() => { for (const made of fixtures.splice(0)) made.close(); });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("message_person", () => {
+  it("localizes the activity confirming a message reached the inbox", () => {
+    addServerLinePacks({
+      zh: {
+        "server.inbox.toldPerson": "已告知{name}",
+        "server.inbox.personReplied": "{name}已回复",
+      },
+    });
+    const f = fixture({ lineLanguage: () => "zh" });
+    f.team.pass("scout", "cleo-private", "Ben", "The launch moved to Friday.");
+    expect(f.lines("cleo-private").at(-1)?.tool?.name).toBe("已告知Ben");
+
+    f.team.pass("scout", "room-thread", "Ben", "Can you review the deck?");
+    const inbox = f.inboxOf(BEN).threadId;
+    const item = f.lines(inbox).at(-1)!;
+    f.team.replyIn(session(BEN.email), inbox, item.id, "Yes, tonight.", {});
+    expect(f.lines("room-thread").at(-1)?.text).toBe("Ben已回复: Yes, tonight.");
+  });
+
   it("passes a private chat's message into the person's inbox, their own chat with their Chief, and nothing else", () => {
     const f = fixture();
     f.said("cleo-private", "My salary review is Friday. Also tell Ben the launch moved to Friday.", CLEO);

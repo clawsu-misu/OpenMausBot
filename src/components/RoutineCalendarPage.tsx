@@ -69,7 +69,7 @@ import {
 } from "@/lib/routine-calendar";
 import { limitResetWhen, type ResetMarker } from "@/lib/limit-resets";
 import { LimitResetFields, type LimitResetChoice } from "./routines/LimitResetFields";
-import { DAY_NAMES, durationLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
+import { dayNames, durationLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
 import { Select } from "./Select";
 import {
   isRoutineProblemRun,
@@ -86,7 +86,6 @@ import { api, openBotThread, openNotificationTarget, useStore, type Bot, type Gr
 import { RoutineScheduleNote } from "./RoutineScheduleNote";
 import { CalendarEventCard, HOUR_HEIGHT, statusState } from "./routines/CalendarEventCard";
 
-const DAY_CHIP_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const INTERVAL_PRESETS = [5, 10, 15, 30, 60];
@@ -301,7 +300,7 @@ export function EventEditor({
   onClose: () => void;
   onSavedCall: (call: CalendarCall) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch } = useStore(), weekdaysOfLocale = dayNames();
   const existingRoutine = seed.routine;
   const { request: editorRequest } = useBotEditor();
   const existingCall = seed.call;
@@ -614,7 +613,7 @@ export function EventEditor({
                   {kind === "routine" && <option value="interval">Every X minutes</option>}
                   <option value="daily">Daily</option>
                   <option value="weekdays">Every weekday (Monday to Friday)</option>
-                  <option value="weekly">Weekly on {DAY_NAMES[new Date(at).getDay()]}</option>
+                  <option value="weekly">Weekly on {weekdaysOfLocale[new Date(at).getDay()]}</option>
                   <option value="custom">Selected weekdays</option>
                   {kind === "routine" && <><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="cron">Custom cron (advanced)</option></>}
                   {kind === "routine" && <option value="limit_reset">{t("routines.limitReset.option")}</option>}
@@ -628,7 +627,7 @@ export function EventEditor({
               {isCronChoice(recurrence) && kind === "routine" && cron && <CronScheduleFields choice={recurrence} value={cronDraft} onChange={(draft) => { setCronDraft(draft); setCronChanged(true); }} runs={cron.runs} error={cron.error} />}
               {recurrence === "custom" && (
                 <div className="flex flex-wrap gap-1.5">
-                  {DAY_NAMES.map((label, day) => <button key={label} type="button" onClick={() => setWeekdays((current) => current.includes(day) ? (current.length === 1 ? current : current.filter((value) => value !== day)) : [...current, day].sort())} className={cn("size-8 rounded-full text-[10px] font-semibold", weekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}>{label[0]}</button>)}
+                  {weekdaysOfLocale.map((label, day) => <button key={label} type="button" onClick={() => setWeekdays((current) => current.includes(day) ? (current.length === 1 ? current : current.filter((value) => value !== day)) : [...current, day].sort())} className={cn("size-8 rounded-full text-[10px] font-semibold", weekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}>{label[0]}</button>)}
                 </div>
               )}
               {recurrence === "interval" && kind === "routine" && (
@@ -716,7 +715,7 @@ export function EventEditor({
                         aria-describedby={intervalDaysInvalid ? "routine-interval-days-error" : undefined}
                         className="flex flex-wrap gap-1.5"
                       >
-                        {DAY_NAMES.map((label, day) => (
+                        {weekdaysOfLocale.map((label, day) => (
                           <button
                             key={label}
                             type="button"
@@ -727,7 +726,7 @@ export function EventEditor({
                             aria-pressed={intervalWeekdays.includes(day)}
                             className={cn("size-8 rounded-full text-[10px] font-semibold", intervalWeekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}
                           >
-                            {DAY_CHIP_LABELS[day]}
+                            {weekdaysOfLocale[day]}
                           </button>
                         ))}
                       </div>
@@ -1187,6 +1186,7 @@ export function CalendarGrid({
   onMove: (item: { kind: EventKind; id: string; at: number }, nextAt: number) => void;
   onResize: (item: CalendarEventItem, duration: number) => void;
 }) {
+  const weekdaysOfLocale = dayNames();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{ day: number; start: number; end: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ day: number; at: number } | null>(null);
@@ -1257,7 +1257,7 @@ export function CalendarGrid({
         {starts.map((start) => {
           const date = new Date(start);
           const isToday = start === today;
-          return <div key={start} role="columnheader" className={cn("border-b border-r border-hairline/40 px-2 py-2 text-center last:border-r-0", isToday && "bg-accent/[0.035]")}><div className={cn("text-[10px] font-medium uppercase tracking-[0.14em]", isToday ? "text-accent" : "text-ink-secondary")}>{DAY_NAMES[date.getDay()]}</div><div className={cn("mx-auto mt-1 flex size-8 items-center justify-center rounded-full text-[15px] font-medium", isToday ? "bg-accent text-accent-ink" : "text-ink")}>{date.getDate()}</div></div>;
+          return <div key={start} role="columnheader" className={cn("border-b border-r border-hairline/40 px-2 py-2 text-center last:border-r-0", isToday && "bg-accent/[0.035]")}><div className={cn("text-[10px] font-medium uppercase tracking-[0.14em]", isToday ? "text-accent" : "text-ink-secondary")}>{weekdaysOfLocale[date.getDay()]}</div><div className={cn("mx-auto mt-1 flex size-8 items-center justify-center rounded-full text-[15px] font-medium", isToday ? "bg-accent text-accent-ink" : "text-ink")}>{date.getDate()}</div></div>;
         })}
       </div>
       <div role="grid" aria-label="Routine and call calendar" onDragEnd={() => setDragPreview(null)} className="relative grid" style={{ height: HOUR_HEIGHT * 24, gridTemplateColumns, minWidth }}>

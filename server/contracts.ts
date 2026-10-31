@@ -111,6 +111,7 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // Sessions start implicitly on the first turn; resumeCursor carries the provider-native continuation (e.g. a Claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  lineLanguage?: string;
   /** Drivers namespace process-level resources (broker socket, CLI session) by botId too: threadIds may coincide across bots. */
   botId?: string;
   text: string;

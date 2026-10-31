@@ -1,6 +1,3 @@
-// The activity log's words in each language the app speaks, for main's own window of it. The packaged app ships the
-// renderer's catalog only inside its page bundle, so main keeps these keys itself; a test holds them equal to src/locales.
-
 export const WORDS = Object.freeze({
   "en": Object.freeze({
     "lending.activity.title": "Activity on this computer",
@@ -254,7 +251,7 @@ export const WORDS = Object.freeze({
     "lending.action.screenTools": "检查了应用和屏幕控制",
     "lending.action.screen": "使用了应用和屏幕",
     "lending.action.website": "打开了一个网站",
-    "lending.action.chrome": "Used your Chrome",
+    "lending.action.chrome": "已使用你的 Chrome",
     "lending.action.invalid": "格式错误的请求",
     "lending.action.other": "其他请求",
   }),

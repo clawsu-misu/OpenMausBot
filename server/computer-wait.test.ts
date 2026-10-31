@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import {
   computerFreeAfterText,
   computerParkedText,
@@ -9,6 +10,11 @@ import {
 } from "./computer-wait.ts";
 
 describe("computer wait wording", () => {
+  it("uses the person's language and keeps English as the default", () => {
+    expect(computerWaitDuration(1_000, "zh")).toBe("1 秒");
+    expect(computerWaitDuration(1_000)).toBe("1 second");
+  });
+
   it("reads as a queue position behind a named turn, never as an error", () => {
     expect(computerWaitingText({ name: "TCPR operator", task: "TCPR 3 hour capacity refill" })).toBe(
       "Waiting for its turn on this computer — TCPR operator is running TCPR 3 hour capacity refill. Starts automatically when that finishes.",

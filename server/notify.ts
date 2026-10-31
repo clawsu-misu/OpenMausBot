@@ -1,5 +1,6 @@
 import type { Notification, NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
+import { serverLine } from "./server-lines.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
@@ -34,33 +35,18 @@ export function buildNotification(
   threadId: string,
   detail: string,
   extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string },
+  language?: string,
 ): Notification | null {
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
-  const who = extra?.group ? `${bot.name} in ${extra.group.name}` : bot.name;
-  const title =
-    kind === "approval"
-      ? `${who} needs approval`
-      : kind === "question"
-        ? `${who} has a question`
-        : kind === "sign-in"
-          ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-          : kind === "routine-failed"
-            ? `${who}'s routine failed`
-            : kind === "routine-deferred"
-              ? `${who}'s routine is waiting`
-            : kind === "turn-failed"
-              ? `${who} couldn't start`
-              : kind === "incident"
-                ? `${who} hit a problem`
-                : kind === "delegation-settled"
-                  ? `${who} resumed with results`
-                  : kind === "mention"
-                    ? `${who} mentioned you`
-                    : kind === "wait"
-                      ? `${who}'s wait is over`
-                      : `${who} finished`;
+  const who = extra?.group ? serverLine(language, "server.notify.whoInGroup", { bot: bot.name, group: extra.group.name }) : bot.name;
+  const titleKey = kind === "approval" ? "server.notify.approval" : kind === "question" ? "server.notify.question"
+    : kind === "sign-in" ? "server.notify.signIn" : kind === "routine-failed" ? "server.notify.routineFailed"
+    : kind === "routine-deferred" ? "server.notify.routineWaiting" : kind === "turn-failed" ? "server.notify.turnFailed"
+    : kind === "incident" ? "server.notify.incident" : kind === "delegation-settled" ? "server.notify.resumed"
+    : kind === "mention" ? "server.notify.mentioned" : kind === "wait" ? "server.notify.waitOver" : "server.notify.finished";
+  const title = serverLine(language, titleKey, { who, site: extra?.site ?? serverLine(language, "server.notify.website") });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 
@@ -80,6 +66,7 @@ export function buildMentionNotification(
   bot: Omit<NotifyBot, "threadId"> & { avatarUrl?: string },
   room: { id: string; name: string; dm?: boolean; memberIds: readonly string[] },
   turn: { threadId: string; turnId?: string; reply: string; profileName?: string },
+  language?: string,
 ): Notification | null {
   if (room.dm) return null;
   const texts = turn.turnId
@@ -91,7 +78,7 @@ export function buildMentionNotification(
   });
   for (const text of texts) {
     const excerpt = personMentionExcerpt(text, { profileName: turn.profileName, botNames });
-    if (excerpt) return buildNotification("mention", { ...bot, threadId: turn.threadId }, turn.threadId, excerpt, { avatarUrl: bot.avatarUrl, group: room });
+    if (excerpt) return buildNotification("mention", { ...bot, threadId: turn.threadId }, turn.threadId, excerpt, { avatarUrl: bot.avatarUrl, group: room }, language);
   }
   return null;
 }

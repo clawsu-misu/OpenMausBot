@@ -2,6 +2,7 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
+import { activeLocale, documentLanguage, setLocale } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], api: vi.fn() }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(),
@@ -34,15 +35,25 @@ const change = (input: Node, value: string) => input.props.onChange!({ target: {
 const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id: "archive-id", createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 9, directories: 3, bytes: 1234, bots: 2, groups: 1, threads: 4, messages: 8, warnings: ["Fixture warning"], exclusions: ["Saved account credentials and connections", "External CLI sign-ins"] };
 let storage: Map<string, string>;
 beforeEach(() => {
+  setLocale("en");
   fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.api.mockReset();
   storage = new Map();
   vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
   vi.stubGlobal("window", { location: { reload: vi.fn() } });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
 async function ready() { fixture.api.mockResolvedValueOnce({ busy: false }); render(); fixture.effects[0](); await flush(); }
 
 describe("Settings full backups", () => {
+  it("formats preview dates and byte counts in the selected app language", () => {
+    setLocale("de");
+    const locale = documentLanguage(activeLocale());
+    const html = renderToStaticMarkup(createElement(WorkspaceBackupSummaryView, { summary }));
+    expect(html).toContain(new Date(summary.createdAt).toLocaleString(locale));
+    expect(html).toContain(new Intl.NumberFormat(locale).format(summary.bytes));
+    expect(html).not.toContain(new Intl.NumberFormat("en").format(summary.bytes));
+  });
+
   it("shows a native file input, password fields and validated summary with warnings", () => {
     const html = render().html;
     expect(html).toContain('type="file" accept=".ombbackup"');

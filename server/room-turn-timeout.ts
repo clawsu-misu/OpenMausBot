@@ -15,6 +15,7 @@ export function roomTurnTimeoutMs(minutes: number): number {
 
 export function parseConversationTurnTimeout(
   value: unknown,
+  invalidLine: () => string = () => "Turn limit must be a whole number from 1 to 1,440, or null to use the group default.",
 ): { ok: true; minutes: number | null } | { ok: false; error: string } {
   if (value === null) return { ok: true, minutes: null };
   if (
@@ -25,7 +26,7 @@ export function parseConversationTurnTimeout(
   ) {
     return {
       ok: false,
-      error: "Turn limit must be a whole number from 1 to 1,440, or null to use the group default.",
+      error: invalidLine(),
     };
   }
   return { ok: true, minutes: value };
@@ -154,7 +155,8 @@ export class RoomTurnStallRegistry {
   }
 }
 
-export function roomTurnTimeoutMessage(botName: string, minutes: number): string {
-  const unit = minutes === 1 ? "minute" : "minutes";
-  return `${botName}'s room turn made no progress for ${minutes} ${unit} and was stopped`;
+export type RoomTimeoutLine = (key: "server.rooms.turnTimedOutOne" | "server.rooms.turnTimedOutMany", params: { bot: string; minutes: number }) => string;
+
+export function roomTurnTimeoutMessage(botName: string, minutes: number, line: RoomTimeoutLine = (key, params) => `${params.bot}'s room turn made no progress for ${params.minutes} ${key.endsWith("One") ? "minute" : "minutes"} and was stopped`): string {
+  return line(minutes === 1 ? "server.rooms.turnTimedOutOne" : "server.rooms.turnTimedOutMany", { bot: botName, minutes });
 }

@@ -6,6 +6,7 @@ import { isStopCommand } from "../room-holds.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { Message, Store } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import { serverLine, type LineLanguage } from "../server-lines.ts";
 
 export interface PersonStopDeps {
   store: Pick<Store, "appendMessage" | "bot" | "botByThread" | "groupByThread" | "taskByThread">;
@@ -17,6 +18,7 @@ export interface PersonStopDeps {
   markStopped(threadId: string): void;
   /** Ends a goal running in this one-on-one chat, so the interrupted turn is its last. */
   stopGoal(threadId: string): void;
+  lineLanguage?: LineLanguage;
 }
 
 export interface TypedStop {
@@ -61,12 +63,12 @@ export function createPersonStop(deps: PersonStopDeps) {
   function noteTeammatesLeftRunning(threadId: string, running: HandoffView[]): void {
     if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return;
     for (const node of running) {
-      const name = store.bot(node.botId)?.name ?? "A teammate";
+      const name = store.bot(node.botId)?.name ?? serverLine(deps.lineLanguage?.(threadId), "server.rooms.teammate");
       const task = store.taskByThread(node.botId, node.threadId);
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `Stopped here — ${name} is still working; open to stop it too`, ok: true },
+        tool: { name: serverLine(deps.lineLanguage?.(threadId), "server.rooms.stoppedHereStillWorking", { name }), ok: true },
         ...(task ? { threadRef: { botId: node.botId, threadId: node.threadId, title: task.title } } : {}),
       });
     }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_ROOM_COMPACT_AT, roomCompactTokens, RoomContextTracker } from "./room-context.ts";
+import { DEFAULT_ROOM_COMPACT_AT, roomCompactTokens, roomResetNote, RoomContextTracker } from "./room-context.ts";
 
 const IDLE_MS = 10 * 60_000;
 
@@ -13,6 +13,14 @@ describe("room context", () => {
     expect(roomCompactTokens(200_000, { roomCompactAt: 0.5 })).toBe(100_000);
     expect(roomCompactTokens(200_000, { roomCompactAt: 50_000 })).toBe(50_000);
     expect(roomCompactTokens(200_000, { autoCompact: false })).toBeNull();
+  });
+
+  it("formats reset notes with the supplied application language", () => {
+    const zh = (key: string, values: { name: string; percent: number }) => key.endsWith("compactedNow")
+      ? `已压缩 ${values.name} 的上下文（已满 ${values.percent}%）：开始新会话并保留房间近期消息`
+      : `${values.name} 的上下文已满 ${values.percent}%：已压缩为新会话并保留房间近期消息`;
+    expect(roomResetNote("小鼠", { reason: "requested", percent: 35 }, zh)).toContain("已压缩 小鼠");
+    expect(roomResetNote("小鼠", { reason: "threshold", percent: 95 }, zh)).toContain("小鼠 的上下文已满 95%");
   });
 
   it("measures each member per room thread, with the model's window when the driver gave none", () => {

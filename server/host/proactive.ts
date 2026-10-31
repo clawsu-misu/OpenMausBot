@@ -72,6 +72,7 @@ export interface ProactiveDeps {
   threadBusy: BriefDeps["threadBusy"];
   notify(notification: Notification | null): void;
   engineName(instanceId: string): string;
+  lineLanguage?: ReadAndDraftDeps["language"];
   needsYou(): NeedsYouItem[];
   hostTimeZone(): string | undefined;
   decide(row: Omit<DecisionRow, "at">): void;
@@ -164,6 +165,7 @@ export function createProactive(deps: ProactiveDeps) {
     adapter: (instanceId) => deps.registry.get(instanceId)?.adapter,
     stale: deps.stale, decide: deps.decide, release: deps.release,
     mayDraft: checks.mayDraft, drafted: checks.drafted,
+    ...(deps.lineLanguage ? { language: deps.lineLanguage } : {}),
     ...(deps.look ? { look: deps.look } : {}),
     wroteDrafts: (botId, count) => { if (botId === owner()?.id) deps.counted?.("drafted", count); },
   });

@@ -6,6 +6,7 @@ import type { WebhookRequestCardData, WebhookRequestDefinition, WebhookRequestOp
 import { newId } from "./contracts.ts";
 import { UNDO_STALE } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { serverLine, type ServerLineKey } from "./server-lines.ts";
 import type { WebhookManager, WebhookTrigger } from "./webhooks.ts";
 
 export interface WebhookRequestCard {
@@ -94,19 +95,19 @@ function managerInput(definition: Partial<WebhookRequestDefinition>) {
 }
 
 /** What the card and the tool result say the trigger does, credential-scrubbed. */
-export function webhookTriggerSentence(webhook: Pick<WebhookTrigger, "prompt" | "eventTypes">, botName: string): string {
+export function webhookTriggerSentence(webhook: Pick<WebhookTrigger, "prompt" | "eventTypes">, botName: string, language?: string): string {
   const instructions = redactSecretsInText(webhook.prompt).trim();
-  const events = webhook.eventTypes?.length ? ` (only ${webhook.eventTypes.join(", ")})` : "";
-  return `When another app sends something${events}, ${botName} ${instructions ? `follows: ${instructions.slice(0, 400)}` : "does what it is asked"}`;
+  const events = webhook.eventTypes?.length ? serverLine(language, "server.routines.webhook.only", { events: webhook.eventTypes.join(", ") }) : "";
+  return serverLine(language, instructions ? "server.routines.webhook.follows" : "server.routines.webhook.default", { events, bot: botName, instructions: instructions.slice(0, 400) });
 }
 
-const ACTION_TITLE: Record<WebhookRequestOperation["action"], string> = {
-  create: "Automation set up",
-  update: "Automation changed",
-  pause: "Automation paused",
-  resume: "Automation resumed",
-  run_now: "Automation ran once",
-  delete: "Automation deleted",
+const ACTION_TITLE: Record<WebhookRequestOperation["action"], ServerLineKey> = {
+  create: "server.routines.action.created",
+  update: "server.routines.action.changed",
+  pause: "server.routines.action.paused",
+  resume: "server.routines.action.resumed",
+  run_now: "server.routines.action.ranOnce",
+  delete: "server.routines.action.deleted",
 };
 
 interface WebhookRequestServiceOptions {
@@ -114,6 +115,7 @@ interface WebhookRequestServiceOptions {
   webhooks: WebhookManager;
   botName: (botId: string) => string;
   now?: () => number;
+  language?: (botId: string) => string | undefined;
 }
 
 export class WebhookRequestService {
@@ -139,6 +141,7 @@ export class WebhookRequestService {
     operation: unknown;
     from?: { botId: string; name: string; color: string };
     canCommit?: () => boolean;
+    language?: string;
   }): WebhookRequestResult {
     const parsed = operationSchema.safeParse(args.operation);
     if (!parsed.success) throw new WebhookRequestError(parsed.error.issues[0]?.message ?? "Invalid webhook trigger request");
@@ -180,7 +183,8 @@ export class WebhookRequestService {
     const subject = after ?? before!;
     const resultId = subject.id;
     const botName = this.options.botName(owner);
-    const summary = webhookTriggerSentence(subject, botName);
+    const language = args.language ?? this.options.language?.(owner);
+    const summary = webhookTriggerSentence(subject, botName, language);
     const requestId = newId();
     const payload: WebhookRequestCardData = {
       version: 1,
@@ -200,7 +204,7 @@ export class WebhookRequestService {
       role: "bot",
       kind: "options",
       card: {
-        title: `${ACTION_TITLE[operation.action]}: ${redactSecretsInText(subject.name)}`,
+        title: `${serverLine(language, ACTION_TITLE[operation.action])}: ${redactSecretsInText(subject.name)}`,
         subtitle: summary,
         options: [],
         answered: "allow",

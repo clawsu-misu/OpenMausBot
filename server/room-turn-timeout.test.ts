@@ -258,4 +258,14 @@ describe("room turn timeout", () => {
       "Atlas's room turn made no progress for 20 minutes and was stopped",
     );
   });
+
+  it("formats timeout notices with the supplied application language", () => {
+    expect(roomTurnTimeoutMessage("小鼠", 2, (_key, { bot, minutes }) => `${bot} 的房间会话因 ${minutes} 分钟没有进展而停止`))
+      .toBe("小鼠 的房间会话因 2 分钟没有进展而停止");
+  });
+
+  it("localizes invalid turn limit validation when given a person-facing formatter", () => {
+    expect(parseConversationTurnTimeout(1.5, () => "会话时限必须是 1 到 1,440 的整数，或设为 null 使用房间默认值。"))
+      .toEqual({ ok: false, error: "会话时限必须是 1 到 1,440 的整数，或设为 null 使用房间默认值。" });
+  });
 });

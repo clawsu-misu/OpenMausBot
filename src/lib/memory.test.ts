@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { activeLocale, documentLanguage, setLocale, t } from "@/lib/i18n";
 
 import {
   capacityStatus,
@@ -12,6 +13,9 @@ import {
   type MemoryCapacity,
   type MemoryJournalRow,
 } from "./memory";
+
+beforeEach(() => setLocale("en"));
+afterEach(() => setLocale("en"));
 
 it("reports organized notes rather than saying nothing was tidied", () => {
   const report = { at: 0, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false };
@@ -50,6 +54,8 @@ const row = (overrides: Partial<MemoryJournalRow> = {}): MemoryJournalRow => ({
 });
 
 describe("capacityStatus", () => {
+  beforeEach(() => setLocale("en"));
+  afterEach(() => setLocale("en"));
   it("always says the plain sentence about what loads", () => {
     const status = capacityStatus(index());
     expect(status.level).toBe("ok");
@@ -85,12 +91,14 @@ describe("capacityStatus", () => {
 });
 
 describe("relativeTime", () => {
+  beforeEach(() => setLocale("en"));
+  afterEach(() => setLocale("en"));
   const now = Date.UTC(2026, 8, 10, 12, 0, 0);
   it.each([
-    [10_000, "just now"],
-    [3 * 60_000, "3 min ago"],
-    [59 * 60_000, "59 min ago"],
-    [2 * 3_600_000, "2 hr ago"],
+    [10_000, "now"],
+    [3 * 60_000, "3 minutes ago"],
+    [59 * 60_000, "59 minutes ago"],
+    [2 * 3_600_000, "2 hours ago"],
     [26 * 3_600_000, "yesterday"],
     [3 * 86_400_000, "3 days ago"],
   ])("%d ms ago reads %s", (ago, label) => {
@@ -99,7 +107,17 @@ describe("relativeTime", () => {
 
   it("falls back to a date past a week and never goes negative", () => {
     expect(relativeTime(now - 10 * 86_400_000, now)).toMatch(/Aug|Sep/);
-    expect(relativeTime(now + 60_000, now)).toBe("just now");
+    expect(relativeTime(now + 60_000, now)).toBe("now");
+  });
+
+  it("uses the selected app language instead of the system language", () => {
+    setLocale("de");
+    const ago = 3 * 60_000;
+    const language = documentLanguage(activeLocale());
+    expect(relativeTime(now - ago, now)).toBe(new Intl.RelativeTimeFormat(language, { numeric: "auto" }).format(-3, "minute"));
+    expect(formatBytes(123_400)).toBe(`${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round(123_400 / 102.4) / 10)} KB`);
+    setLocale("zh");
+    expect(fileManagerLabel("darwin")).toBe("在 Finder 中显示");
   });
 });
 
@@ -130,9 +148,9 @@ describe("journalSource", () => {
     expect(journalSource(row({ actor: "person", via: "ui" }))).toBe("in Settings");
     expect(journalSource(row({ actor: "person", via: "api" }))).toBe("through the API");
     expect(journalSource(row({ actor: "person", via: "disk" }))).toBe("changed outside the app");
-    expect(journalSource(row({ actor: "person", via: "revert" }))).toBe("undo");
+    expect(journalSource(row({ actor: "person", via: "revert" }))).toBe(t("memory.source.undo"));
     expect(journalSource(row({ actor: "import", via: "import" }))).toBeNull();
-    expect(journalSource(row({ actor: "upkeep", via: "tidy" }))).toBe("tidy-up");
+    expect(journalSource(row({ actor: "upkeep", via: "tidy" }))).toBe(t("memory.source.tidy"));
     expect(journalSource(row({ actor: "upkeep", via: "capture", threadTitle: "Plans" }))).toBe("noticed in chat “Plans”");
     expect(journalSource(row({ actor: "upkeep", via: "capture" }))).toBe("noticed in a chat");
   });

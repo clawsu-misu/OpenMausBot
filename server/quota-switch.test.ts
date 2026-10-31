@@ -6,6 +6,7 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection, ProviderAdapter, ProviderSnapshot } from "./contracts.ts";
 import { createCoordinator, type Coordinator, type HostTurnResult } from "./coordinator.ts";
 import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
+import "./server-line-packs.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
@@ -401,6 +402,14 @@ describe("quota switch", () => {
   });
 
   describe("answering a card an earlier version left open", () => {
+    it("localizes the quota notice for the conversation owner", async () => {
+      deps.language = () => "zh";
+      quota = createQuotaSwitch(deps);
+      const card = (await failed(QUOTA, { messageId: said("continue this") }))!;
+      await answer(card, "Codex");
+      expect(notices()).toContainEqual({ name: "notice: 用量限制后正在切换到 Codex 继续", ok: true });
+    });
+
     it("switches this conversation through the model-switch gate and resends the exact message that failed", async () => {
       const quoted = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "It will rain on Friday." }).id;
       const messageId = said("how's the weather", { dataContext: { cardId: "sales" }, replyToId: quoted });

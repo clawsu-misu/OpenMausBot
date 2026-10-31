@@ -8,6 +8,7 @@ import type { RuntimeEvent } from "../../contracts.ts";
 import { ensureDirs } from "../../config.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import "../../server-line-packs.ts";
 import {
   classifyCursorError,
   createCursorAgentDriver,
@@ -709,11 +710,11 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
     });
     const recorder = recordEvents(instance.adapter);
     try {
-      await instance.adapter.sendTurn({ threadId: "t-cursor-invalid", text: "hi", model: "gpt-5.3-codex" });
+      await instance.adapter.sendTurn({ threadId: "t-cursor-invalid", text: "hi", model: "gpt-5.3-codex", lineLanguage: "zh-CN" });
       const done = await recorder.until((e) => e.type === "turn.completed");
       expect(done).toMatchObject({ type: "turn.completed", ok: true });
       expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([
-        expect.objectContaining({ message: expect.stringContaining("did not accept gpt-5.3-codex in this session, so it runs Auto") }),
+        expect.objectContaining({ message: expect.stringContaining("Cursor 在此会话中不接受 gpt-5.3-codex") }),
       ]);
     } finally {
       recorder.stop();

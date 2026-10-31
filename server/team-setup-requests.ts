@@ -11,6 +11,7 @@ import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capab
 import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
+import { serverLine } from "./server-lines.ts";
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
@@ -83,6 +84,7 @@ interface Options {
   driverCapabilities?(instanceId: string): DriverCapabilities | undefined;
   validateChange?(before: BotRecord, fields: TeamSetupFields): void;
   maxBots: number;
+  language?(threadId: string): string | undefined;
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
   deleteBot(botId: string, revalidate: () => void, request?: TeamSetupRequest): Promise<void>;
@@ -331,7 +333,10 @@ export class TeamSetupRequestService {
     const before = request.deletion ? undefined : this.undoBefore(request);
     let result = await this.apply(request, true, canCommit);
     const undo = before && result.state === "applied" && !result.error ? this.undoRecord(result, before) : undefined;
-    const title = result.state === "applied" ? (request.deletion ? `Deleted @${request.deletion.name}` : "Team setup applied") : "Team setup not applied";
+    const language = this.options.language?.(request.threadId);
+    const title = result.state === "applied"
+      ? (request.deletion ? `Deleted @${request.deletion.name}` : serverLine(language, "server.routines.teamSetup.applied"))
+      : serverLine(language, "server.routines.teamSetup.notApplied");
     let messageId: string | undefined;
     try {
       messageId = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: {

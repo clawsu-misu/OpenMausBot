@@ -15,6 +15,7 @@ import {
 import { closeMessageDb } from "./message-db.ts";
 import type { Notification } from "./notify.ts";
 import { Store, type BotRecord } from "./store.ts";
+import { addServerLinePacks } from "./server-lines.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
 
@@ -100,6 +101,23 @@ describe("peer approval card lifecycle", () => {
     expect(await verdict).toBe("allow");
     expect(store.bot(from.id)?.activity).toBe("working");
     expect(frames).toHaveLength(1);
+  });
+
+  it("localizes approval card labels without changing its action values", () => {
+    addServerLinePacks({ zh: {
+      "server.peerApproval.askBot": "@{sender}想联系@{target}",
+      "server.peerApproval.delegateBot": "@{sender}想委派任务给@{target}",
+      "server.peerApproval.postToRoom": "@{sender}想在房间“{target}”中发言",
+      "server.peerApproval.allow": "允许",
+      "server.peerApproval.deny": "拒绝",
+      "server.peerApproval.alwaysAllow": "始终允许",
+    } });
+    bus = { store, broadcast: () => {}, lineLanguage: () => "zh" };
+    void requestPeerApproval(bus, from, target, "ping", "ask_bot");
+    const card = pendingCard(store, from)!.card!;
+    expect(card.title).toBe("@Asker想联系@Helper");
+    expect(card.options).toEqual(["允许", "拒绝", "始终允许"]);
+    cancelPeerApprovalsFor(from.id);
   });
 
   it("aims the notification and legacy activity at the room when the card is raised there", () => {

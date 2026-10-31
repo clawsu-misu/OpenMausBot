@@ -1,6 +1,7 @@
 // The engines' own prompts stay the only gates: nothing here answers, holds or grants anything.
 import type { RuntimeEvent } from "./contracts.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { serverLine } from "./server-lines.ts";
 
 type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
 
@@ -20,8 +21,10 @@ export function settledWaitingChip(name: string, kind: string, behavior: Resolve
     : { name: question ? `${who}'s question was answered` : `${who}'s request was approved`, ok: true };
 }
 
-export function queuedBehindPersonText(name: string, kind: "approval" | "question" | "review", title: string): string {
-  return `Queued for @${name} behind your ${kind === "question" ? "answer" : kind} in “${title}”`;
+export function queuedBehindPersonText(name: string, kind: "approval" | "question" | "review", title: string, language?: string): string {
+  const waitingFor = serverLine(language, kind === "question" ? "server.routines.wait.queuedAnswer"
+    : kind === "review" ? "server.routines.wait.queuedReview" : "server.routines.wait.queuedApproval");
+  return serverLine(language, "server.routines.wait.queuedBehind", { person: `@${name}`, kind: waitingFor, title });
 }
 
 const MAX_ACTIONS = 10;

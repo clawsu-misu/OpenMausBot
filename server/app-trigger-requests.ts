@@ -8,6 +8,7 @@ import { AppTriggerError, type AppTriggerManager } from "./app-triggers.ts";
 import { newId } from "./contracts.ts";
 import { UNDO_STALE } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export interface AppTriggerRequestCard {
   title: string;
@@ -57,33 +58,32 @@ const operationSchema = z.discriminatedUnion("action", [
   ...(["pause", "resume", "run_now", "delete"] as const).map((action) => z.object({ action: z.literal(action), triggerId: idSchema, forBot: targetSchema })),
 ]);
 
-const ACTION_TITLE: Record<AppTriggerRequestOperation["action"], string> = {
-  create: "Automation set up",
-  update: "Automation changed",
-  pause: "Automation paused",
-  resume: "Automation resumed",
-  run_now: "Automation ran once",
-  delete: "Automation deleted",
+const ACTION_TITLE: Record<AppTriggerRequestOperation["action"], ServerLineKey> = {
+  create: "server.routines.action.created",
+  update: "server.routines.action.changed",
+  pause: "server.routines.action.paused",
+  resume: "server.routines.action.resumed",
+  run_now: "server.routines.action.ranOnce",
+  delete: "server.routines.action.deleted",
 };
 
 type Described = Pick<AppTrigger, "app" | "event" | "eventName" | "accountLabel" | "filter" | "delivery">;
 
-/** When it fires, in English for the model: "When an email arrives in Gmail (sales) from acme.com (it checks every 15 minutes)". */
-export function appWhenText(trigger: Described): string {
+export function appWhenText(trigger: Described, language?: string): string {
   const filter = trigger.filter ?? {};
-  const details = [filter.from && `from ${filter.from}`, filter.subject && `about “${filter.subject}”`, filter.label && `labeled ${filter.label}`, filter.text && `mentioning “${filter.text}”`]
+  const details = [filter.from && serverLine(language, "server.routines.app.from", { value: filter.from }), filter.subject && serverLine(language, "server.routines.app.about", { value: filter.subject }), filter.label && serverLine(language, "server.routines.app.labeled", { value: filter.label }), filter.text && serverLine(language, "server.routines.app.mentioning", { value: filter.text })]
     .filter(Boolean).join(" ");
   const account = trigger.accountLabel ? ` (${trigger.accountLabel})` : "";
   const when = trigger.event === "GMAIL_NEW_GMAIL_MESSAGE"
-    ? `When an email arrives in Gmail${account}`
-    : `When “${trigger.eventName}” happens in ${appLabel(trigger.app)}${account}`;
-  return `${when}${details ? ` ${details}` : ""}${trigger.delivery === "poll" ? " (it checks every 15 minutes)" : ""}`;
+    ? serverLine(language, "server.routines.app.whenEmail", { account })
+    : serverLine(language, "server.routines.app.whenEvent", { event: trigger.eventName, app: appLabel(trigger.app), account });
+  return `${when}${details ? ` ${details}` : ""}${trigger.delivery === "poll" ? serverLine(language, "server.routines.app.poll") : ""}`;
 }
 
 /** What the card and the tool result say it does; the app shows its own translated sentence. */
-export function appTriggerSentence(trigger: Described & Pick<AppTrigger, "prompt">, botName: string): string {
+export function appTriggerSentence(trigger: Described & Pick<AppTrigger, "prompt">, botName: string, language?: string): string {
   const instructions = redactSecretsInText(trigger.prompt).trim();
-  return `${appWhenText(trigger)}, ${botName} ${instructions ? `follows: ${instructions.slice(0, 400)}` : "reviews the event"}`;
+  return serverLine(language, instructions ? "server.routines.app.follows" : "server.routines.app.reviews", { when: appWhenText(trigger, language), bot: botName, instructions: instructions.slice(0, 400) });
 }
 
 export type AppTriggerRequestResult = { requestId: string; messageId: string; state: "applied"; action: AppTriggerRequestOperation["action"]; resultId: string; summary: string; runId?: string };
@@ -114,7 +114,7 @@ export class AppTriggerRequestService {
     return trigger;
   }
 
-  async submit(args: { botId: string; threadId: string; operation: unknown; from?: { botId: string; name: string; color: string }; canCommit?: () => boolean }): Promise<AppTriggerRequestResult> {
+  async submit(args: { botId: string; threadId: string; operation: unknown; from?: { botId: string; name: string; color: string }; canCommit?: () => boolean; language?: string }): Promise<AppTriggerRequestResult> {
     const parsed = operationSchema.safeParse(args.operation);
     if (!parsed.success) throw new AppTriggerError(parsed.error.issues[0]?.message ?? "Invalid automation request");
     const operation = parsed.data as AppTriggerRequestOperation;
@@ -148,7 +148,7 @@ export class AppTriggerRequestService {
         break;
     }
     const subject = after ?? before!;
-    const summary = appTriggerSentence(subject, this.options.botName(owner));
+    const summary = appTriggerSentence(subject, this.options.botName(owner), args.language);
     const requestId = newId();
     const payload: AppTriggerRequestCardData = {
       version: 1,
@@ -170,7 +170,7 @@ export class AppTriggerRequestService {
       role: "bot",
       kind: "options",
       card: {
-        title: `${ACTION_TITLE[operation.action]}: ${redactSecretsInText(subject.name)}`,
+        title: `${serverLine(args.language, ACTION_TITLE[operation.action])}: ${redactSecretsInText(subject.name)}`,
         subtitle: summary,
         options: [],
         answered: "allow",

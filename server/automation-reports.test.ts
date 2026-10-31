@@ -2,10 +2,11 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RoutineRunReport } from "../shared/routines.ts";
-import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText } from "./automation-reports.ts";
+import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText, waitingCardText } from "./automation-reports.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
+import "./server-line-packs.ts";
 
 const selection = () => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -46,6 +47,18 @@ describe("what the chat's own session reads", () => {
   });
 });
 
+describe("recovered automation reports", () => {
+  it("uses English by default and the recipient's language when supplied", () => {
+    const at = Date.UTC(2026, 9, 26, 2, 40);
+    expect(recoveredText("Morning brief", at)).toMatch(/^Recovered: Morning brief finished OK at /);
+    expect(recoveredText("Morning brief", at, "zh-CN")).toMatch(/^已恢复：Morning brief于 /);
+    expect(recoveredText("Morning brief", at, "")).toMatch(/^Recovered: Morning brief finished OK at /);
+    expect(recoveredText("Morning brief", at, "not_a_locale")).toMatch(/^Recovered: Morning brief finished OK at /);
+    expect(waitingCardText({ kind: "signin", signIn: { url: "https://example.com", site: "example.com", place: "browser", reason: "dashboard login" } }, "zh-CN"))
+      .toBe("我需要你登录 example.com: dashboard login.");
+  });
+});
+
 /** A real Store; the routine runs live in a stand-in for the RoutineManager, which keeps their report states. */
 function fixture() {
   const store = new Store(selection);
@@ -55,6 +68,7 @@ function fixture() {
   const busy = new Set<string>();
   const notified: Array<{ kind: string; threadId: string; detail: string }> = [];
   const wrote: string[] = [];
+  const languageThreads: Array<string | undefined> = [];
   const routines = {
     listRuns: () => [...runs.values()].map((run) => ({ ...run })).reverse(),
     noteReport: (id: string, report: RoutineRunReport | undefined) => {
@@ -73,6 +87,7 @@ function fixture() {
   const create = () => createAutomationReports({
     store, routines: () => manager, busy: (_botId, threadId) => busy.has(threadId),
     wrote: (_bot: BotRecord, threadId) => wrote.push(threadId),
+    lineLanguage: (_bot: BotRecord, threadId?: string) => { languageThreads.push(threadId); return undefined; },
     notify: (kind, _bot, threadId, detail) => notified.push({ kind, threadId, detail }),
   });
   const reports = create();
@@ -95,7 +110,7 @@ function fixture() {
   /** Everything written into the chat since the bot said hello. */
   const added = () => store.messagesFor(main).filter((message) => !greeting.has(message.id));
   return {
-    store, bot, main, runs, busy, notified, wrote, reports, finished, lines, added, create,
+    store, bot, main, runs, busy, notified, wrote, languageThreads, reports, finished, lines, added, create,
     offline: () => { manager = null; },
     online: () => { manager = routines; },
   };
@@ -120,6 +135,15 @@ describe("automation reports", () => {
     expect(f.wrote).toEqual([f.main]);
     expect(f.notified).toEqual([{ kind: "done", threadId: f.main, detail: "Inbox brief: Acme replied about the order." }]);
     expect(f.store.messagesFor(f.main).some((message) => message.kind === "routine.run")).toBe(false);
+  });
+
+  it("resolves a report's language from its actual destination thread", () => {
+    const f = fixture();
+    const secondary = f.store.createTask(f.bot.id, "Secondary chat", false)!.threadId;
+    const run = f.finished("Acme replied.", "Inbox brief", { resultsThreadId: secondary });
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.languageThreads).toEqual([secondary]);
+    expect(f.store.messagesFor(secondary).some((message) => message.automation?.runId === run.id)).toBe(true);
   });
 
   it("writes nothing, marks nothing and notifies nobody for a run with nothing new", () => {

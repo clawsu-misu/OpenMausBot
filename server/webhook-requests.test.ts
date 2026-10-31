@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { WebhookRequestService, type WebhookRequestCard, type WebhookRequestStore } from "./webhook-requests.ts";
 import { WebhookManager } from "./webhooks.ts";
+import "./server-line-packs.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -67,6 +68,13 @@ describe("WebhookRequestService", () => {
     const kept = webhooks.currentSecret(webhook!.id, false)!;
     expect(kept.secret).toMatch(/^whsec_/);
     expect(webhooks.authorize(webhook!.endpointId, kept.secret!)).toBe(true);
+  });
+
+  it("writes webhook receipt copy in the selected language", () => {
+    const { service, store } = harness();
+    const applied = service.submit({ botId: "bot-a", threadId: "thread-a", operation: create, language: "zh-CN" });
+    expect(applied.summary).toBe("其他应用发送内容时，由Support执行：Draft a follow-up for the lead in the payload.");
+    expect(store.messagesFor("thread-a")[0]?.card?.title).toBe("已设置自动化: Interested replies");
   });
 
   it("refuses a duplicate, another bot's webhook, and a field a webhook does not have", () => {

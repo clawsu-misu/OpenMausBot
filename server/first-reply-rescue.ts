@@ -3,7 +3,8 @@
 // and "Connect your subscription". The notice settles once the AI's first output arrives, and is over (history,
 // no live buttons) once its turn ends without one. Silence later in a turn stays the engine's own business (the ACP
 // quiet watch speaks at 60 s and 180 s).
-import { firstReplyOverName, firstReplySettledName, firstReplyWaitingName, type FirstReplyRescue } from "../shared/first-reply-rescue.ts";
+import { firstReplyOverName, firstReplySettledName, firstReplyWaitingName, type FirstReplyLine, type FirstReplyRescue } from "../shared/first-reply-rescue.ts";
+import { serverLine, type LineLanguage } from "./server-lines.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { openRescueMessages } from "./message-db.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -31,6 +32,7 @@ export interface FirstReplyRescueDeps {
   /** The instance actually running the thread's turn, when known. */
   runningEngine(threadId: string): string | undefined;
   engineName(instanceId: string): string;
+  lineLanguage?: LineLanguage;
   /** A turn nobody watches live (the harness's own upkeep, a routine run) gets no notice. */
   quiet(threadId: string): boolean;
   /** Whether this turn is still the one the thread is running: its end can be lost (a stop during the handshake,
@@ -52,6 +54,7 @@ interface Watch {
 
 export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(event: RuntimeEvent): void } {
   const watches = new Map<string, Watch>();
+  const lineFor = (threadId: string): FirstReplyLine => (key, params) => serverLine(deps.lineLanguage?.(threadId), key, params);
   closeLeftOpen(deps);
 
   const pause = (watch: Watch) => {
@@ -88,7 +91,7 @@ export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(ev
       botId: bot.id, threadId, turnId: watch.turnId, ...(requestMessageId ? { requestMessageId } : {}), instanceId, ai,
       ...(group ? { groupId: group.id } : {}),
     };
-    const name = firstReplyWaitingName(bot.name, ai);
+    const name = firstReplyWaitingName(bot.name, ai, lineFor(threadId));
     const row = deps.store.appendMessage(threadId, {
       role: "bot", kind: "activity", turnId: watch.turnId,
       ...(speaker && group ? { from: { botId: speaker.botId, name: speaker.name, color: speaker.color } } : {}),
@@ -105,7 +108,8 @@ export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(ev
     watch.phase = "over";
     if (!posted) return;
     const rescue: FirstReplyRescue = { ...posted.rescue, [how]: true };
-    const name = how === "settled" ? firstReplySettledName(rescue.ai) : firstReplyOverName(posted.botName, rescue.ai);
+    const line = lineFor(threadId);
+    const name = how === "settled" ? firstReplySettledName(rescue.ai, line) : firstReplyOverName(posted.botName, rescue.ai, line);
     try {
       deps.store.patchMessage(threadId, posted.messageId, { tool: { name, ok: true, rescue } });
     } catch (error) {
@@ -165,7 +169,7 @@ function closeLeftOpen(deps: FirstReplyRescueDeps): void {
     const tool = message.tool;
     if (!tool?.rescue) continue;
     const botName = deps.store.bot(tool.rescue.botId)?.name;
-    const name = botName ? firstReplyOverName(botName, tool.rescue.ai) : tool.name;
+    const name = botName ? firstReplyOverName(botName, tool.rescue.ai, ((key, params) => serverLine(deps.lineLanguage?.(threadId), key, params))) : tool.name;
     try {
       deps.store.patchMessage(threadId, message.id, { tool: { ...tool, name, rescue: { ...tool.rescue, over: true } } });
     } catch (error) {

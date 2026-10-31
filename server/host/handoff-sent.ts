@@ -10,19 +10,20 @@ export type AddressedRoom = { id: string; name: string; here: boolean };
 export type SentVia = "room" | "lane" | "direct";
 
 const roomWords = (room: AddressedRoom) => room.here ? "this room" : room.name;
+export type HandoffSentLine = (key: "server.rooms.sentDirectly" | "server.rooms.sent" | "server.rooms.sentToRoom" | "server.rooms.outsideRoomNote", params: { recipient?: string; room?: string }) => string;
 
-export function outsideRoomNote(room: AddressedRoom | undefined, via: SentVia): string {
-  return room && via === "direct" ? `it isn't in ${roomWords(room)}, so it got this directly: ` : "";
+export function outsideRoomNote(room: AddressedRoom | undefined, via: SentVia, line?: HandoffSentLine): string {
+  return room && via === "direct" ? (line ? line("server.rooms.outsideRoomNote", { room: roomWords(room) }) : `it isn't in ${roomWords(room)}, so it got this directly: `) : "";
 }
 
-export function sentRow(input: { sender: Who; recipient: Who; threadId: string; title?: string; reason?: string; doneWhen?: string; room?: AddressedRoom; via: SentVia }): Omit<Message, "id" | "at"> {
+export function sentRow(input: { sender: Who; recipient: Who; threadId: string; title?: string; reason?: string; doneWhen?: string; room?: AddressedRoom; via: SentVia; line?: HandoffSentLine }): Omit<Message, "id" | "at"> {
   const { sender, recipient, threadId, room, via } = input;
   const outside = room && via === "direct" ? room : undefined;
   return {
     role: "bot", kind: "activity",
     from: { botId: sender.id, name: sender.name, color: sender.color },
     tool: {
-      name: outside ? `Sent to ${recipient.name} directly: it isn't in ${roomWords(outside)}.` : `Sent to ${recipient.name}${room && !room.here ? ` · ${room.name}` : ""}`,
+      name: outside ? (input.line ? input.line("server.rooms.sentDirectly", { recipient: recipient.name, room: roomWords(outside) }) : `Sent to ${recipient.name} directly: it isn't in ${roomWords(outside)}.`) : input.line ? room && !room.here ? input.line("server.rooms.sentToRoom", { recipient: recipient.name, room: room.name }) : input.line("server.rooms.sent", { recipient: recipient.name }) : `Sent to ${recipient.name}${room && !room.here ? ` · ${room.name}` : ""}`,
       ok: true, ...(input.reason ? { output: input.reason } : {}),
     },
     ...(input.doneWhen ? { doneWhen: input.doneWhen } : {}),

@@ -93,6 +93,12 @@ describe("commentaryChunks", () => {
     for (const chunk of chunks) expect(new TextEncoder().encode(chunk).length).toBeLessThanOrEqual(500);
     expect(chunks.at(-1)?.endsWith(FULL_ANSWER_IN_CHAT)).toBe(true);
   });
+
+  it("uses the supplied language for the full-answer pointer", () => {
+    const chunks = commentaryChunks(Array.from({ length: 200 }, () => "A short spoken sentence."), (key) =>
+      key === "server.rooms.fullAnswerInChat" ? "完整回答请查看聊天。" : "通话");
+    expect(chunks.at(-1)?.endsWith("完整回答请查看聊天。")).toBe(true);
+  });
 });
 
 describe("clampAppend", () => {

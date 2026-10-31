@@ -21,6 +21,7 @@ import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
+import "./server-line-packs.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
@@ -220,6 +221,7 @@ describe("Store", () => {
     store.setBotsSection([], "Existing");
     expect(store.renameSection("Delivery", "Existing")).toContain("already exists");
     expect(store.renameSection("Delivery", "bad\nname")).toContain("control characters");
+    expect(store.renameSection("Delivery", "bad\nname", undefined, () => "部门名称无效")).toBe("部门名称无效");
     bot.busy = true;
     expect(store.renameSection("Delivery", "Launch")).toContain("active work");
     expect(bot.section).toBe("Delivery");
@@ -544,6 +546,14 @@ describe("Store", () => {
       text: `Hi, I'm ${bot.name}. What would you like me to do?`,
     });
     expect(bot.modelSelection).toEqual(selection());
+  });
+
+  it("seeds a new bot's greeting in the creating person's language", () => {
+    const store = new Store(selection, undefined, undefined, "en");
+    const bot = store.createBot({ name: "LocaleSmoke" }, { language: "zh-CN" });
+    expect(store.messagesFor(bot.threadId)[0]?.text).toBe("你好，我是LocaleSmoke。你希望我做什么？");
+    const english = store.createBot({ name: "EnglishSmoke" });
+    expect(store.messagesFor(english.threadId)[0]?.text).toBe("Hi, I'm EnglishSmoke. What would you like me to do?");
   });
 
   it("offers Set me up on a blank bot's greeting, never on one given a role or instructions", () => {

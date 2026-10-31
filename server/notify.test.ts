@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
 describe("buildNotification", () => {
+  it("localizes notification titles when a person's language is known", () => {
+    expect(buildNotification("approval", bot, "thread-1", "x", undefined, "zh")?.title).toBe("Scout 需要审批");
+    expect(buildNotification("approval", bot, "thread-1", "x")?.title).toBe("Scout needs approval");
+  });
+
   it("names the bot and carries the detail, per kind", () => {
     expect(buildNotification("approval", bot, "thread-1", "rm -rf ./build")).toMatchObject({
       kind: "approval",

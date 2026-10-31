@@ -2,6 +2,7 @@
 import type { Message } from "./store.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { RoutineRun } from "./routines.ts";
+import { serverLine } from "./server-lines.ts";
 
 export function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
   const visibleSummary = run.status === "waiting" ? run.attention : run.output;
@@ -22,33 +23,33 @@ export function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun
   return card;
 }
 
-export function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): string {
+export function routineRunFallbackText(card: NonNullable<Message["routineRun"]>, language?: string): string {
   const goalState = card.goalStatus === "needs-input"
-    ? "needs your input"
+    ? serverLine(language, "server.routines.run.needsInput")
     : card.goalStatus === "blocked"
-      ? "was blocked"
+      ? serverLine(language, "server.routines.run.blocked")
       : card.goalStatus === "limit-reached"
-        ? "reached its limit"
+        ? serverLine(language, "server.routines.run.limitReached")
         : card.goalStatus === "stopped"
-          ? "was stopped"
+          ? serverLine(language, "server.routines.run.stopped")
           : card.goalStatus === "failed"
             ? "failed"
             : undefined;
   const state = goalState ?? (
     card.status === "waiting"
-      ? "needs your attention"
+      ? serverLine(language, "server.routines.run.needsAttention")
       : card.status === "completed"
-        ? "completed"
+        ? serverLine(language, "server.routines.run.completed")
         : card.status === "failed"
-          ? "failed"
+            ? serverLine(language, "server.routines.run.failed")
           : card.status === "cancelled"
-            ? "was cancelled"
+            ? serverLine(language, "server.routines.run.cancelled")
             : card.status === "missed"
-              ? "was missed"
+              ? serverLine(language, "server.routines.run.missed")
               : card.status === "queued" && card.deferredAt != null
-                ? "deferred: target busy"
+                ? serverLine(language, "server.routines.run.deferredBusy")
               : card.status
   );
   const detail = card.summary ?? card.error;
-  return `Routine “${card.routineName}” ${state}${detail ? `\n\n${detail}` : ""}`;
+  return `${serverLine(language, "server.routines.run.title", { name: card.routineName, state })}${detail ? `\n\n${detail}` : ""}`;
 }

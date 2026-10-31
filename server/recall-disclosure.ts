@@ -22,8 +22,10 @@ export function claimRecallCrossings(roomThreadId: string, sources: readonly str
   return { threadIds, count };
 }
 
-export function recallCrossingLabel(botName: string, count: number): string {
-  return `${botName} recalled ${count} message${count === 1 ? "" : "s"} from its private chat with you`;
+export type RecallLine = (key: "server.rooms.recalledPrivateMessage" | "server.rooms.recalledPrivateMessages" | "server.rooms.briefPrivateChat" | "server.rooms.briefPrivateChats", params: { bot: string; count: number }) => string;
+
+export function recallCrossingLabel(botName: string, count: number, line: RecallLine = (key, params) => `${params.bot} recalled ${params.count} message${key.endsWith("Messages") ? "s" : ""} from its private chat with you`): string {
+  return line(count === 1 ? "server.rooms.recalledPrivateMessage" : "server.rooms.recalledPrivateMessages", { bot: botName, count });
 }
 
 export function forgetRecallCrossings(roomThreadId?: string): void {
@@ -31,6 +33,6 @@ export function forgetRecallCrossings(roomThreadId?: string): void {
   else announced.delete(roomThreadId);
 }
 
-export function briefCrossingLabel(botName: string, count: number): string {
-  return `${botName}'s recent-work brief covers ${count} private chat${count === 1 ? "" : "s"} with you`;
+export function briefCrossingLabel(botName: string, count: number, line: RecallLine = (key, params) => `${params.bot}'s recent-work brief covers ${params.count} private chat${key.endsWith("Chats") ? "s" : ""} with you`): string {
+  return line(count === 1 ? "server.rooms.briefPrivateChat" : "server.rooms.briefPrivateChats", { bot: botName, count });
 }

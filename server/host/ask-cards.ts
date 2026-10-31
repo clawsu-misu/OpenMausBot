@@ -14,6 +14,7 @@ import { isStopCommand } from "../room-holds.ts";
 import { needsInputQuestion } from "../runtime-coordinator.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { settledWaitingChip } from "../waiting-on-person.ts";
+import { serverLine } from "../server-lines.ts";
 
 const OPEN_QUESTION = "needs-input-";
 const NEEDS_INPUT_LINE = /^needs input:/i;
@@ -33,6 +34,7 @@ export interface AskCardsDeps {
   answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer"; message: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   /** The conversation a card in `threadId` was asked in: an inbox copy's original. */
   answeredIn(threadId: string, requestId: string): string;
+  language?(threadId: string): string | undefined;
 }
 
 /** The name a bot's model knows its question tool by: its engine's, unless the bot's tool selection leaves it out. */
@@ -68,7 +70,7 @@ export function createAskCards(deps: AskCardsDeps) {
     if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId)) return;
     const chip = store.appendMessage(delegator.threadId, { role: "bot", kind: "activity",
       from: { botId: asker.id, name: asker.name, color: asker.color },
-      tool: { name: `Waiting on your ${kind} in @${asker.name}` },
+      tool: { name: serverLine(deps.language?.(threadId), kind === "approval" ? "server.routines.ask.waitingApproval" : "server.routines.ask.waitingAnswer", { bot: asker.name }) },
       threadRef: { botId: asker.id, threadId, title: store.taskByThread(asker.id, threadId)?.title ?? asker.name },
     });
     waitingOnPersonChips.set(`${threadId}:${requestId}`, { threadId: delegator.threadId, messageId: chip.id, name: asker.name, kind });
@@ -86,10 +88,10 @@ export function createAskCards(deps: AskCardsDeps) {
     }
   }
 
-  function newestQuestionChip(threadId: string, aboutThreadId: string): string | undefined {
+  function newestQuestionChip(threadId: string, aboutThreadId: string, expectedName: string): string | undefined {
     return store.activePath(threadId).findLast((message) =>
       message.kind === "activity" && (message.threadRef?.threadId ?? message.comm?.threadId) === aboutThreadId
-      && message.tool?.name.includes(" needs your input: ") === true)?.tool?.name;
+      && message.tool?.name === expectedName)?.tool?.name;
   }
 
   /** The card a parked teammate's NEEDS INPUT line asks with, in place of that line; false when it was there already. */
@@ -97,7 +99,7 @@ export function createAskCards(deps: AskCardsDeps) {
     const requestId = `${OPEN_QUESTION}${node.id}-${node.executions}`;
     const rows = store.messagesFor(node.threadId);
     if (rows.some((message) => message.card?.requestId === requestId)) return false;
-    const card: OptionCardData = { title: "Your bot has a question", subtitle: question, options: [], requestId, requestType: "question" };
+    const card: OptionCardData = { title: serverLine(deps.language?.(node.threadId), "server.routines.ask.title"), subtitle: question, options: [], requestId, requestType: "question" };
     const since = node.startedAt ?? node.createdAt;
     const asking = rows.findLast((message) => message.role === "bot" && message.kind === "text" && message.at >= since
       && needsInputQuestion(message.text ?? "") !== undefined);
@@ -117,14 +119,15 @@ export function createAskCards(deps: AskCardsDeps) {
     if (!bot) return;
     const parent = node.parentId ? deps.node(node.parentId) : undefined;
     const title = store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work";
-    const chip = `${bot.name} needs your input: ${question.slice(0, 180)}`;
+    const language = deps.language?.(node.threadId);
+    const chip = serverLine(language, "server.routines.ask.waiting", { bot: bot.name, question: question.slice(0, 180) });
     const group = parent?.groupId ? store.group(parent.groupId) : undefined;
     let liveParent: HandoffView | undefined;
     if (parent?.groupId) liveParent = group && store.groupTaskByThread(group.id, parent.threadId) ? parent : undefined;
     else if (parent) liveParent = store.taskByThread(parent.botId, parent.threadId) ? parent : undefined;
     const asksWithCard = Boolean(node.parentId && !node.groupId && !node.cards?.length);
     const posted = asksWithCard && openQuestionCard(node, question);
-    if (restored && (asksWithCard ? !posted : !liveParent || newestQuestionChip(liveParent.threadId, node.threadId) === chip)) return;
+    if (restored && (asksWithCard ? !posted : !liveParent || newestQuestionChip(liveParent.threadId, node.threadId, chip) === chip)) return;
     if (liveParent && !(asksWithCard && deps.copiedInto(liveParent.threadId, bot.id, node.threadId))) {
       store.appendMessage(liveParent.threadId, {
         role: "bot", kind: "activity",

@@ -15,6 +15,7 @@ import type { ProviderAdapter } from "./contracts.ts";
 import type { DecisionRow } from "./decision-log.ts";
 import { recordsText } from "./records-block.ts";
 import type { RoutineRun } from "./routines.ts";
+import { serverLine } from "./server-lines.ts";
 
 type RequestOpened = Extract<RuntimeEvent, { type: "request.opened" }>;
 type Adapter = Pick<ProviderAdapter, "respondToRequest" | "interruptTurn">;
@@ -66,6 +67,7 @@ export interface ReadAndDraftDeps {
   look?(threadId: string): { draft(reply: DraftReply): boolean } | null;
   /** Drafts a confined conversation was let write, by its bot. */
   wroteDrafts?(botId: string, count: number): void;
+  language?(threadId: string): string | undefined;
 }
 
 export interface DraftReply { threadId: string; to?: string }
@@ -129,7 +131,8 @@ export function createReadAndDraft(deps: ReadAndDraftDeps) {
   function answers(event: RequestOpened, asker: Bot, say: Say): boolean {
     if (!confines(event.threadId)) return false;
     const adapter = deps.adapter(event.providerInstanceId ?? asker.modelSelection.instanceId);
-    say({ role: "bot", kind: "activity", tool: { name: `Refused (reads and drafts only): ${event.summary.slice(0, 120)}`, ok: false } });
+    const refusal = serverLine(deps.language?.(event.threadId), "server.routines.readAndDraft.refusal", { summary: event.summary.slice(0, 120) });
+    say({ role: "bot", kind: "activity", tool: { name: refusal, ok: false } });
     deps.decide({ threadId: event.threadId, requestId: event.requestId, botId: asker.id, botName: asker.name, tool: event.tool, summary: event.summary, decision: "auto-denied", source: "routine", rule: RULE });
     const decision = { behavior: event.requestType === "question" ? "answer" as const : "deny" as const, message: READ_AND_DRAFT_REFUSAL };
     void (async () => {

@@ -93,11 +93,13 @@ function bytePrefix(text: string, budget: number): string {
 }
 const MAX_SPOKEN_CHUNKS = 3;
 export const FULL_ANSWER_IN_CHAT = "The full answer is in the chat.";
+export type LiveCallLine = (key: "server.rooms.fullAnswerInChat" | "server.rooms.callWithBot", params: { bot?: string }) => string;
 
 /** Group speakable utterances (from /api/tts/prepare) into appends. Long
  * answers are cut at a sentence boundary with a pointer to the chat, because
  * a voice reading four minutes of a report is not a conversation. */
-export function commentaryChunks(utterances: string[]): string[] {
+export function commentaryChunks(utterances: string[], line: LiveCallLine = () => FULL_ANSWER_IN_CHAT): string[] {
+  const fullAnswerInChat = line("server.rooms.fullAnswerInChat", {});
   const chunks: string[] = [];
   let current = "";
   let truncated = false;
@@ -122,9 +124,9 @@ export function commentaryChunks(utterances: string[]): string[] {
   else if (current) truncated = true;
   if (truncated && chunks.length) {
     const last = chunks[chunks.length - 1];
-    chunks[chunks.length - 1] = bytes(last) + 1 + bytes(FULL_ANSWER_IN_CHAT) <= APPEND_BYTE_LIMIT
-      ? `${last} ${FULL_ANSWER_IN_CHAT}`
-      : `${bytePrefix(last, APPEND_BYTE_LIMIT - bytes(FULL_ANSWER_IN_CHAT) - 1).replace(/\s+\S*$/, "")} ${FULL_ANSWER_IN_CHAT}`;
+    chunks[chunks.length - 1] = bytes(last) + 1 + bytes(fullAnswerInChat) <= APPEND_BYTE_LIMIT
+      ? `${last} ${fullAnswerInChat}`
+      : `${bytePrefix(last, APPEND_BYTE_LIMIT - bytes(fullAnswerInChat) - 1).replace(/\s+\S*$/, "")} ${fullAnswerInChat}`;
   }
   return chunks;
 }
@@ -191,6 +193,6 @@ export function formatCallDuration(seconds: number): string {
 
 /** A Live call row's text: what a client that does not know kind "call"
  * shows as a plain line ("Call with Ada · 1:42"). */
-export function liveCallRowText(botName: string, seconds: number): string {
-  return `Call with ${botName} · ${formatCallDuration(seconds)}`;
+export function liveCallRowText(botName: string, seconds: number, line: LiveCallLine = (_key, params) => `Call with ${params.bot}`): string {
+  return line("server.rooms.callWithBot", { bot: botName }) + ` · ${formatCallDuration(seconds)}`;
 }

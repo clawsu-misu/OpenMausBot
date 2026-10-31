@@ -11,6 +11,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, type DefaultSelectionContext, type SelectableInstance } from "./default-model-selection.ts";
 import type { Store } from "./store.ts";
+import { serverLine } from "./server-lines.ts";
 
 export interface CreditMovesOptions {
   credit: { owns(instanceId: string): boolean; status(): "active" | "used_up" | "ended"; storage(): string };
@@ -21,6 +22,7 @@ export interface CreditMovesOptions {
   saveDefault(selection: ModelSelection): void;
   threadBusy(botId: string, threadId: string): boolean;
   engineName(instanceId: string): string;
+  lineLanguage?: (threadId: string) => string | undefined;
   log?: (line: string) => void;
 }
 
@@ -137,8 +139,7 @@ export function createCreditMoves(options: CreditMovesOptions) {
       const pinned = moving.filter(task => task.modelSelection !== undefined).map(task => task.threadId);
       if (pinned.length) store.followBotModel(bot.id, pinned);
       if (moved.delete(bot.id)) forgot = true;
-      const notice = `notice: ${options.engineName(next.instanceId)} is connected, so this conversation uses it now instead of the trial Claude credit.`;
-      for (const task of moving) store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: { name: notice, ok: true } });
+      for (const task of moving) store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: { name: serverLine(options.lineLanguage?.(task.threadId), "server.cloudCredit.connected", { engine: options.engineName(next.instanceId) }), ok: true } });
     }
     if (forgot) remember(moved!);
   }

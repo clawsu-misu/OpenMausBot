@@ -53,6 +53,11 @@ export interface EscalationCount {
   muted: boolean;
 }
 
+export type EscalationChipLine = (
+  key: "server.escalations.chipRoom" | "server.escalations.chipThread" | "server.escalations.chipMain",
+  params: { bot: string; room?: string; title?: string; gate: string },
+) => string;
+
 export class EscalationLedger {
   private readonly at = new Map<string, number[]>();
   private readonly options: { now?: () => number; windowMs?: number; hardLimit?: number };
@@ -86,8 +91,14 @@ function atGate(escalation: Escalation): string {
   return `${peerName(escalation.bot.name)}'s work ${where} is parked at a gate: ${escalation.gate}.`;
 }
 
-export function escalationChip(escalation: Escalation): string {
-  return `Escalation: ${atGate(escalation)}`;
+export function escalationChip(escalation: Escalation, line?: EscalationChipLine): string {
+  if (!line) return `Escalation: ${atGate(escalation)}`;
+  const params = { bot: peerName(escalation.bot.name), gate: escalation.gate };
+  return escalation.room
+    ? line("server.escalations.chipRoom", { ...params, room: escalation.room })
+    : escalation.title
+      ? line("server.escalations.chipThread", { ...params, title: fold(escalation.title, 60) })
+      : line("server.escalations.chipMain", params);
 }
 
 export function escalationText(escalation: Escalation, count: EscalationCount): string {

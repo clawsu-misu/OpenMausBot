@@ -5,6 +5,7 @@ import { GROUP_GOAL_MAX_TURNS } from "../group-goal-run.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import type { RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { serverLine } from "../server-lines.ts";
 
 export interface LiveGoalRun {
   runId: string;
@@ -24,6 +25,7 @@ export interface GoalCardDeps {
   notify(notification: Notification | null): void;
   routineSourceOwner(run: RoutineRun): { bot: BotRecord } | null;
   routineSourceThread(run: RoutineRun): string | null;
+  language?(threadId: string): string | undefined;
 }
 
 export function createGoalCards(deps: GoalCardDeps) {
@@ -31,11 +33,12 @@ export function createGoalCards(deps: GoalCardDeps) {
 
   function start(threadId: string, coordinator: Pick<BotRecord, "id" | "name" | "color">, goal: string, runId: string): LiveGoalRun {
     const startedAt = Date.now();
-    const detail = `${coordinator.name} is coordinating this goal.`;
+    const language = deps.language?.(threadId);
+    const detail = serverLine(language, "server.routines.goal.coordinating", { bot: coordinator.name });
     const card = store.appendMessage(threadId, {
       role: "bot",
       kind: "goal.run",
-      text: `Goal in progress: ${detail}`,
+      text: serverLine(language, "server.routines.goal.progress", { detail }),
       from: { botId: coordinator.id, name: coordinator.name, color: coordinator.color },
       goalRun: {
         runId,
@@ -96,7 +99,7 @@ export function createGoalCards(deps: GoalCardDeps) {
           "question",
           notificationBot,
           deps.routineSourceThread(routineRun) ?? routineRun.threadId ?? threadId,
-          safeDetail || `${routineRun.routineName} needs your input`,
+          safeDetail || serverLine(deps.language?.(deps.routineSourceThread(routineRun) ?? routineRun.threadId ?? threadId), "server.routines.goal.needsInput", { name: routineRun.routineName }),
           { avatarUrl: notificationBot.avatarUrl },
         ));
       }
@@ -115,15 +118,15 @@ export function createGoalCards(deps: GoalCardDeps) {
       }
     }
     if (!stillHere()) return;
-    const fallbackState = status === "completed"
-      ? "completed"
-      : status === "needs-input"
-        ? "needs your input"
-        : status === "limit-reached"
-          ? "reached its limit"
-          : status;
+    const language = deps.language?.(threadId);
+    const fallbackState = serverLine(language, status === "completed" ? "server.routines.goal.completed"
+      : status === "needs-input" ? "server.routines.goal.needsInputState"
+        : status === "limit-reached" ? "server.routines.goal.limitReached"
+          : status === "blocked" ? "server.routines.goal.blocked"
+            : status === "paused" ? "server.routines.goal.paused"
+              : status === "stopped" ? "server.routines.goal.stopped" : "server.routines.goal.failed");
     store.patchMessage(threadId, run.cardMessageId, {
-      text: `Goal ${fallbackState}: ${card.detail || card.goal}`,
+      text: serverLine(language, "server.routines.goal.finished", { state: fallbackState, detail: card.detail || card.goal }),
       goalRun: card,
     });
   }
@@ -131,10 +134,11 @@ export function createGoalCards(deps: GoalCardDeps) {
   function progress(threadId: string, run: LiveGoalRun | undefined, detail: string): void {
     if (!run || run.finished) return;
     const safeDetail = redactSecretsInText(detail.trim()).slice(0, 500);
+    const language = deps.language?.(threadId);
     const current = store.messagesFor(threadId).find((message: Message) => message.id === run.cardMessageId);
     if (current?.goalRun?.status === "working" && current.goalRun.detail === safeDetail) return;
     store.patchMessage(threadId, run.cardMessageId, {
-      text: `Goal in progress: ${safeDetail || redactSecretsInText(run.goal)}`,
+      text: serverLine(language, "server.routines.goal.progress", { detail: safeDetail || redactSecretsInText(run.goal) }),
       goalRun: {
         runId: run.runId,
         goal: redactSecretsInText(run.goal),

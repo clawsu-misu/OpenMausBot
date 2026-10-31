@@ -47,7 +47,6 @@ export type {
 } from "../shared/wire.ts";
 export type { GroupTask as GroupTaskRecord, BotProject as BotProjectRecord } from "../shared/wire.ts";
 export type { InstalledPlaybook, InstalledPackageMetadata, MausColor, MausExpression } from "../shared/wire.ts";
-
 export type Message = WireMessage;
 
 export interface GroupPackageStamp {
@@ -56,7 +55,8 @@ export interface GroupPackageStamp {
   memberKeys: string[];
   parts: Record<RoomPart, PartPair>;
 }
-
+type SectionErrorLine = (key: `server.departments.${"notFound" | "invalidName" | "alreadyExists" | "stopBeforeRename" | "moveMembersFirst" | "stopBeforeDelete" | "generalChiefConflict"}`) => string;
+const sectionError = (line: SectionErrorLine | undefined, key: Parameters<SectionErrorLine>[0], english: string) => line?.(key) ?? english;
 export type GroupRecord = Omit<WireGroup, "working" | "usage"> & { installedPackage?: GroupPackageStamp };
 export type GroupWirePrivateKeys = "installedPackage";
 export type GroupWireProjection = Omit<GroupRecord, GroupWirePrivateKeys> & Pick<WireGroup, "usage"> & { working: boolean };
@@ -733,20 +733,20 @@ export class Store {
     }
   }
 
-  renameSection(name: string, nextName: string, computers?: TeamComputers): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such department";
+  renameSection(name: string, nextName: string, computers?: TeamComputers, line?: SectionErrorLine): string | undefined {
+    if (!name || !this.sections.includes(name)) return sectionError(line, "server.departments.notFound", "No such department");
     nextName = nextName.trim();
-    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Department name must be 1 to 60 characters without control characters";
+    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return sectionError(line, "server.departments.invalidName", "Department name must be 1 to 60 characters without control characters");
     if (name === nextName) return undefined;
-    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A department with that name already exists";
+    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return sectionError(line, "server.departments.alreadyExists", "A department with that name already exists");
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     const affected = this.bots.filter(bot => members.includes(bot) || bot.managedSections?.some(section => sectionKey(section) === name));
     if (affected.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-      return "Stop this department's active work before renaming it";
+      return sectionError(line, "server.departments.stopBeforeRename", "Stop this department's active work before renaming it");
     }
     // Removing an empty identity revokes its old grants, so recreating it cannot restore access.
-    if (!members.length && !rooms.length && !computers?.forSection(name)) return this.changeEmptySection(name, nextName);
+    if (!members.length && !rooms.length && !computers?.forSection(name)) return this.changeEmptySection(name, nextName, line);
     const nextBots = this.bots.map(bot => ({ ...bot,
       ...(members.includes(bot) ? { section: nextName } : {}),
       ...(bot.managedSections ? { managedSections: [...new Set(bot.managedSections.map(section => sectionKey(section) === name ? nextName : section))] } : {}),
@@ -774,13 +774,13 @@ export class Store {
     return undefined;
   }
 
-  changeEmptySection(name: string, nextName: string | null): string | undefined {
-    if (!this.sections.includes(name)) return "No such department";
+  changeEmptySection(name: string, nextName: string | null, line?: SectionErrorLine): string | undefined {
+    if (!this.sections.includes(name)) return sectionError(line, "server.departments.notFound", "No such department");
     if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
-      return "Move all bots (including archived bots) and group chats out of this department first";
+      return sectionError(line, "server.departments.moveMembersFirst", "Move all bots (including archived bots) and group chats out of this department first");
     }
     if (nextName !== null && nextName !== name && this.sections.includes(nextName)) {
-      return "A department with that name already exists";
+      return sectionError(line, "server.departments.alreadyExists", "A department with that name already exists");
     }
     if (nextName === name) return undefined;
     const revoked = this.bots.filter((bot) => bot.managedSections?.some((section) => sectionKey(section) === name));
@@ -796,19 +796,19 @@ export class Store {
     return undefined;
   }
 
-  deleteSection(name: string): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such department";
+  deleteSection(name: string, line?: SectionErrorLine): string | undefined {
+    if (!name || !this.sections.includes(name)) return sectionError(line, "server.departments.notFound", "No such department");
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-      return "Stop this department's active work before deleting it";
+      return sectionError(line, "server.departments.stopBeforeDelete", "Stop this department's active work before deleting it");
     }
     const nextBots = this.bots.map(bot => ({ ...bot,
       ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
       ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
     }));
     if (chiefConflict(nextBots)) {
-      return "General already has a Chief of Staff. Move or change this department's Chief before deleting it";
+      return sectionError(line, "server.departments.generalChiefConflict", "General already has a Chief of Staff. Move or change this department's Chief before deleting it");
     }
     const nextGroups = this.groups.map(group => sectionKey(group.section) === name ? { ...group, section: undefined } : group);
     try {
@@ -966,7 +966,7 @@ export class Store {
       finishedAt: number;
     } | null,
     fallbackDetail = "OpenMausBot restarted before this goal finished.",
-    fallbackFinishedAt = Date.now(),
+    fallbackFinishedAt = Date.now(), recoveredLine?: (threadId: string, status: GroupGoalRunCardData["status"], detail: string) => string,
   ): number {
     const ownedThreadIds = new Set<string>(this.bots.flatMap((bot) => (bot.tasks ?? []).map((task) => task.threadId)));
     for (const group of this.groups) {
@@ -987,7 +987,7 @@ export class Store {
           ? "reached its turn limit"
           : resolution.status;
       this.patchMessage(hit.threadId, hit.message.id, {
-        text: `Goal ${state}: ${resolution.detail}`,
+        text: recoveredLine?.(hit.threadId, resolution.status, resolution.detail) ?? `Goal ${state}: ${resolution.detail}`,
         goalRun: {
           ...hit.message.goalRun,
           status: resolution.status,
@@ -1329,7 +1329,7 @@ export class Store {
       >
     > = {},
     opts: {
-      seedMessages?: boolean; id?: string; threadId?: string;
+      seedMessages?: boolean; id?: string; threadId?: string; language?: string;
     } = {},
   ): BotRecord {
     const toolScope = parseToolScope(profile.toolScope);
@@ -1382,7 +1382,7 @@ export class Store {
     // Before its transcript: clients need the bot/thread mapping to place either message.
     this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
+      this.appendMessage(bot.threadId, initialGreetingMessage(name, opts.language ?? this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
     }
     return bot;
   }
