@@ -51,6 +51,16 @@ function fixture(options = {}) {
 }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
+test("changing the tray language updates its labels without opening a window", () => {
+  const { tray, trayInstance, splash } = fixture();
+  tray.setLanguage("zh-CN");
+  assert.equal(trayInstance.menu[0].label, "打开 OpenMaus Bot");
+  assert.equal(trayInstance.menu[2].label, "退出 OpenMaus Bot");
+  assert.equal(splash.window.visible, false);
+  tray.setLanguage("en");
+  assert.equal(trayInstance.menu[0].label, "Open OpenMaus Bot");
+});
+
 class UnreadyWindow extends Window {
   loadURL() { return Promise.resolve(); }
 }

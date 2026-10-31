@@ -46,6 +46,8 @@ files:
   - "!electron/resources/OpenMausBot Recorder.app/**"
   - "!**/node_modules/**"
   - package.json
+  - src/locales/en.json
+  - src/locales/zh.json
 
 asar: true
 

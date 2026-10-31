@@ -1552,9 +1552,8 @@ function activeOrigin() {
 }
 
 function refreshApplicationMenu() {
-  Menu.setApplicationMenu(
-    buildApplicationMenu({
-      environments: environmentsState.environments,
+  Menu.setApplicationMenu(buildApplicationMenu({
+      environments: environmentsState.environments, language: desktopPrefs?.language() || app.getLocale(),
       activeId: environmentsState.activeId,
       onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
       onAddFromClipboard: () => void addServerFromClipboard(),
@@ -1565,8 +1564,7 @@ function refreshApplicationMenu() {
       openAtLogin: loginItem.available() ? { checked: loginItem.chosen(), onToggle: on => { loginItem.choose(on); refreshApplicationMenu(); } } : null,
       ...cloudMenuOptions(),
       home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
-    }),
-  );
+  }));
 }
 
 function persistEnvironments(next) {
@@ -2897,7 +2895,7 @@ app.whenReady().then(async () => {
   if (process.platform === "win32") {
     try {
       desktopTray = createSystemTray({
-        Tray, Menu, nativeImage, iconPath: APP_ICON,
+        Tray, Menu, nativeImage, iconPath: APP_ICON, language: desktopPrefs?.language() || app.getLocale(),
         getWindow: () => startupScreen?.window ?? mainWindow ?? (openWindowForLink?.(), mainWindow),
         onQuit: () => app.quit(),
       });
@@ -3030,8 +3028,11 @@ app.whenReady().then(async () => {
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
   desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
+  desktopTray?.setLanguage(desktopPrefs.language() || app.getLocale());
   updatesConsent = registerDesktopPrefs({ ipcMain, cloudAccount: () => cloudAccount, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
     languageChanged: (language, sender) => {
+      refreshApplicationMenu();
+      desktopTray?.setLanguage(language || app.getLocale());
       for (const win of appWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
       chromeRail.send("desktop-language:changed", language);
     },

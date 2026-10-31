@@ -32,6 +32,15 @@ describe("buildApplicationMenu", () => {
       }),
     );
 
+  it("uses Chinese labels while preserving menu actions and environment names", () => {
+    const onConnect = vi.fn();
+    const template = build("win32", { language: "zh-CN", onConnect });
+    const items = template.find(entry => entry.label === "服务器").submenu;
+    expect(items.some(entry => entry.label === "X — localhost")).toBe(true);
+    items.find(entry => entry.label === "连接到服务器…").click();
+    expect(onConnect).toHaveBeenCalledOnce();
+  });
+
   it.each(["darwin", "linux", "win32"])("lists a saved local environment by its folder, so switching servers never fails on %s", platform => {
     const onSwitch = vi.fn();
     const local = { id: "e1", kind: "local", name: "Work", dataDir: "/Users/me/.openmausbot-work" };
